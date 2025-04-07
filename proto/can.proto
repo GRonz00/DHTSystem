@@ -1,0 +1,75 @@
+syntax = "proto3";
+option go_package = "DHTSystem/proto";
+package proto;
+message Coordinate{
+  float min_x = 1;
+  float min_y = 2;
+  float max_x = 3;
+  float max_y = 4;
+  float center_x = 5;
+  float center_y =6;
+}
+message Point{
+  float x = 1;
+  float y = 2;
+}
+message NewNodeInformation{
+  Point point = 1;
+  IPAddress address = 2;
+}
+
+message NodeInformation{
+  Coordinate coordinate = 1;
+  IPAddress originNode = 2;
+}
+message InformationToAddNode{
+  NodeInformation oldNode = 1;
+  Coordinate newCoordinate = 2;
+  repeated Resource resources = 3;  //Le risorse di cui il nuovo nodo  si occupa
+  repeated NodeInformation neighboursOldNode = 4;
+}
+message Resources{
+  Coordinate coordinateOldNode = 1;
+  repeated Resource resources = 2;
+}
+message HeartBeatMessage{
+  repeated NodeInformation nodes = 1; //tutti i nodi di cui è a conoscienza (compreso se stesso) con coordinate
+  string fromWho =2;
+}
+message IPAddress{
+  string address = 1;
+}
+message Resource{
+  string key = 1;
+  string value = 2;
+}
+message Bool{
+  bool b = 1;
+}
+message Key{
+  string k = 1;
+}
+message AddressList{
+  repeated string ad = 1;
+}
+service BootstrapService{
+  rpc addNode(IPAddress) returns (IPAddress);
+  rpc removeNode(IPAddress) returns (Bool);
+  rpc findActiveNode(AddressList) returns (IPAddress);
+
+}
+
+service NodeService{
+  rpc addNode(NewNodeInformation) returns (InformationToAddNode);
+  rpc heartBeat(HeartBeatMessage) returns (HeartBeatMessage);
+  rpc addResource(Resource) returns (IPAddress);
+  rpc getResource(Key) returns (Resource);
+  rpc deleteResource(Key) returns (IPAddress);
+  rpc unionZone(InformationToAddNode) returns (Bool);
+  rpc entrustResources(Resources) returns (Bool);
+  rpc splitZone(NewNodeInformation) returns (InformationToAddNode);
+  rpc deepSearch(HeartBeatMessage) returns (HeartBeatMessage);
+
+
+  //removeNode
+}

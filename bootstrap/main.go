@@ -1,0 +1,84 @@
+package main
+
+import (
+	pb "DHTSystem/proto"
+	"context"
+	"fmt"
+	"google.golang.org/grpc"
+	"log"
+	"math/rand"
+	"net"
+	"sync"
+)
+
+type BootstrapServer struct {
+	pb.UnimplementedBootstrapServiceServer
+	nodes []string
+	mu    sync.Mutex
+}
+
+func (b *BootstrapServer) FindActiveNode(ctx context.Context, address *pb.AddressList) (*pb.IPAddress, error) {
+	log.Printf("Tutti i nodi che ho sono %v", b.nodes)
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	excluded := address.Ad
+	excludedSet := make(map[string]struct{}, len(excluded))
+	for _, addr := range excluded {
+		excludedSet[addr] = struct{}{}
+	}
+
+	var validNodes []string
+
+	// Filtra solo i nodi che non sono nella lista degli esclusi
+	for _, node := range b.nodes {
+		if _, found := excludedSet[node]; !found {
+			validNodes = append(validNodes, node)
+		}
+	}
+
+	// Se non ci sono nodi validi, ritorna errore
+	if len(validNodes) == 0 {
+		return nil, fmt.Errorf("no suitable node found")
+	}
+
+	// Scegli un nodo casuale tra quelli validi
+	i := rand.Intn(len(validNodes))
+	return &pb.IPAddress{Address: validNodes[i]}, nil
+}
+func (b *BootstrapServer) AddNode(ctx context.Context, address *pb.IPAddress) (*pb.IPAddress, error) {
+	log.Println("Adding node:", address)
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.nodes = append(b.nodes, address.Address)
+	return &pb.IPAddress{Address: address.Address}, nil
+}
+
+func (b *BootstrapServer) RemoveNode(ctx context.Context, address *pb.IPAddress) (*pb.Bool, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for i, n := range b.nodes {
+		if n == address.Address {
+			b.nodes[i] = b.nodes[len(b.nodes)-1]
+			b.nodes = b.nodes[:len(b.nodes)-1]
+			return &pb.Bool{B: true}, nil
+		}
+	}
+	return &pb.Bool{B: false}, nil
+}
+func main() {
+	listener, err := net.Listen("tcp", ":50051")
+	if err != nil {
+		log.Fatalf("Errore nel creare il listener: %v", err)
+	}
+
+	grpcServer := grpc.NewServer()
+	bootstrap := &BootstrapServer{
+		nodes: make([]string, 0),
+	}
+	pb.RegisterBootstrapServiceServer(grpcServer, bootstrap)
+	log.Println("Bootstrap server in ascolto su :50051")
+
+	if err := grpcServer.Serve(listener); err != nil {
+		log.Fatalf("Errore nel servire il bootstrap: %v", err)
+	}
+}

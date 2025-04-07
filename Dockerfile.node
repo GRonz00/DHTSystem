@@ -1,0 +1,26 @@
+FROM golang:alpine
+
+WORKDIR /app
+
+RUN apk update && \
+    apk add --no-cache protoc protobuf-dev && \
+    go install google.golang.org/protobuf/cmd/protoc-gen-go@latest && \
+    go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+
+ENV PATH="$PATH:$(go env GOPATH)/bin"
+
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY proto/ proto/
+RUN  protoc \
+    --go_out=. \
+    --go_opt=paths=source_relative \
+    --go-grpc_out=. \
+    --go-grpc_opt=paths=source_relative \
+    proto/can.proto
+
+COPY node/main.go node/main.go
+RUN CGO_ENABLED=0 go build -ldflags="-s -w" -trimpath -o app node/main.go
+
+CMD [ "/app/app" ]
