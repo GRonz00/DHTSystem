@@ -27,14 +27,22 @@ message InformationToAddNode{
   Coordinate newCoordinate = 2;
   repeated Resource resources = 3;  //Le risorse di cui il nuovo nodo  si occupa
   repeated NodeInformation neighboursOldNode = 4;
+
 }
 message Resources{
+  repeated NodeInformation neighboursOldNode = 3;
   Coordinate coordinateOldNode = 1;
   repeated Resource resources = 2;
+}
+message ResourcesBackup{
+  repeated Resource resources = 1;
+  string address = 2;
+
 }
 message HeartBeatMessage{
   repeated NodeInformation nodes = 1; //tutti i nodi di cui è a conoscienza (compreso se stesso) con coordinate
   string fromWho =2;
+  repeated string backupNodes = 3;
 }
 message IPAddress{
   string address = 1;
@@ -52,11 +60,18 @@ message Key{
 message AddressList{
   repeated string ad = 1;
 }
+message AddBackup{
+  string address = 1;
+  Resource resource = 2;
+}
+message DeleteBackup{
+  string address = 1;
+  string key = 2;
+}
 service BootstrapService{
   rpc addNode(IPAddress) returns (IPAddress);
   rpc removeNode(IPAddress) returns (Bool);
   rpc findActiveNode(AddressList) returns (IPAddress);
-
 }
 
 service NodeService{
@@ -68,7 +83,14 @@ service NodeService{
   rpc unionZone(InformationToAddNode) returns (Bool);
   rpc entrustResources(Resources) returns (Bool);
   rpc splitZone(NewNodeInformation) returns (InformationToAddNode);
-  rpc deepSearch(HeartBeatMessage) returns (HeartBeatMessage);
+  rpc updateZone(Coordinate) returns (Bool);
+  rpc removeNodeAsNeighbour(IPAddress) returns (Bool);
+  rpc addResourceToBackupNode(AddBackup) returns (Bool);
+  rpc deleteResourceToBackupNode(DeleteBackup) returns (Bool);
+  rpc heartBeatBackup(Bool) returns (Bool);
+  rpc deleteResourcesBackup(ResourcesBackup) returns (Bool);
+
+
 
 
   //removeNode

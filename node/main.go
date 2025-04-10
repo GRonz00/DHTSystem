@@ -14,9 +14,12 @@ import (
 	"math/rand"
 	"net"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
+
+const NREP = 2
 
 type Coordinates struct {
 	MinX    float32
@@ -41,24 +44,51 @@ type NodeServer struct {
 	neighbours           map[string]Coordinates //Key=address mappa con le coordinate del vicino
 	neighboursNeighbours map[string][]string    //Mappa con i vicini del vicino, usata in caso di failure per takeover
 	resources            map[string]string      //La chiave è il nome della risorsa (La posizione è data dal hash del nome)
-	tempResource         map[string]string      //Salvataggio temporaneo delle risorse di un nodo che se ne va finché la rete non si ri-bilanciata
+	backupNodes          []string               //Nodi che si occupano del backup delle mie risorse (scelti casualmente tra i vicini,
+	// cosi so se sono ancora attivi ecc.) Il numero è dato dal min(N rep, #vicini)
+	backupNodesNeighbour map[string][]string          //In caso di failure il vicino che deve recuperare deve sapere chi detiene le risorse
+	nodesIBackup         map[string]map[string]string //Backup risorse altri nodi (Cosi conosco sia i nodi a cui faccio da backup che le loro risorse)
 }
 
 func (n *NodeServer) contain(point Point) bool {
 	return point.X >= n.coordinates.MinX && point.X <= n.coordinates.MaxX &&
 		point.Y >= n.coordinates.MinY && point.Y <= n.coordinates.MaxY
 }
+
 func stringToPoint(s string) Point {
-	hash := sha256.Sum256([]byte(s))         // Calcola SHA-256
-	num := binary.BigEndian.Uint64(hash[:8]) // Usa i primi 8 byte come numero
-	a := float32(num) / float32(^uint64(0))
-	return Point{X: a, Y: a}
+	hash := sha256.Sum256([]byte(s))
+
+	// Usa i primi 8 byte per X
+	numX := binary.BigEndian.Uint64(hash[:8])
+	// Usa i successivi 8 byte per Y
+	numY := binary.BigEndian.Uint64(hash[8:16])
+
+	// Converte in float32 tra 0 e 1
+	x := float32(numX) / float32(^uint64(0))
+	y := float32(numY) / float32(^uint64(0))
+
+	return Point{X: x, Y: y}
+}
+func (n *NodeServer) AddResourceToBackupNode(ctx context.Context, resource *pb.AddBackup) (*pb.Bool, error) {
+	n.nodesIBackup[resource.Address][resource.Resource.Key] = resource.Resource.Value
+	return nil, nil
+}
+func (n *NodeServer) DeleteResourceToBackupNode(ctx context.Context, resource *pb.DeleteBackup) (*pb.Bool, error) {
+	_, ok := n.nodesIBackup[resource.Address][resource.Key]
+	if ok == true {
+		delete(n.nodesIBackup[resource.Address], resource.Key)
+	}
+	return nil, nil
 }
 func (n *NodeServer) AddResource(ctx context.Context, resource *pb.Resource) (*pb.IPAddress, error) {
 	point := stringToPoint(resource.Key)
 	if n.contain(point) {
 		n.resources[resource.Key] = resource.Value
 		log.Printf("Added resource %s to node %s", resource.Key, n.address)
+		for _, backupNode := range n.backupNodes {
+			backupClient, _ := createClient(backupNode)
+			backupClient.AddResourceToBackupNode(context.Background(), &pb.AddBackup{Address: n.address, Resource: resource})
+		}
 		return &pb.IPAddress{Address: n.address}, nil
 	} else {
 		nodeToRouting, err := n.routing(point)
@@ -71,7 +101,6 @@ func (n *NodeServer) AddResource(ctx context.Context, resource *pb.Resource) (*p
 			log.Printf("Impossibile connettersi al nodo %s: %v", nodeToRouting, err)
 			return nil, err
 		}
-		defer conn.Close()
 		nodeClient := pb.NewNodeServiceClient(conn)
 		return nodeClient.AddResource(context.Background(), resource)
 	}
@@ -80,6 +109,10 @@ func (n *NodeServer) DeleteResource(ctx context.Context, resourceKey *pb.Key) (*
 	point := stringToPoint(resourceKey.K)
 	if n.contain(point) {
 		delete(n.resources, resourceKey.K)
+		for _, backupNode := range n.backupNodes {
+			backupClient, _ := createClient(backupNode)
+			backupClient.DeleteResourceToBackupNode(context.Background(), &pb.DeleteBackup{Address: n.address, Key: resourceKey.K})
+		}
 		return &pb.IPAddress{Address: n.address}, nil
 	} else {
 		nodeToRouting, err := n.routing(point)
@@ -92,7 +125,6 @@ func (n *NodeServer) DeleteResource(ctx context.Context, resourceKey *pb.Key) (*
 			log.Printf("Impossibile connettersi al nodo %s: %v", nodeToRouting, err)
 			return nil, err
 		}
-		defer conn.Close()
 		nodeClient := pb.NewNodeServiceClient(conn)
 		return nodeClient.DeleteResource(context.Background(), resourceKey)
 	}
@@ -115,7 +147,6 @@ func (n *NodeServer) GetResource(ctx context.Context, resourceKey *pb.Key) (*pb.
 			log.Printf("Impossibile connettersi al nodo %s: %v", nodeToRouting, err)
 			return nil, err
 		}
-		defer conn.Close()
 		nodeClient := pb.NewNodeServiceClient(conn)
 		return nodeClient.GetResource(context.Background(), resourceKey)
 	}
@@ -169,7 +200,6 @@ func (n *NodeServer) routing(point Point) (string, error) {
 
 	return bestNode, nil
 }
-
 func (n *NodeServer) removeOldNeighbours() {
 	for neighbour, coordinates := range n.neighbours {
 		if !(                                                                                  //se non è un vicino lo rimuovo
@@ -179,6 +209,11 @@ func (n *NodeServer) removeOldNeighbours() {
 				(coordinates.CenterX <= n.coordinates.MaxX && coordinates.CenterX >= n.coordinates.MinX)) || neighbour == n.address {
 			_, ok := n.neighbours[neighbour]
 			if ok {
+				for _, backup := range n.backupNodes {
+					if neighbour == backup { //Quello che mi faceva da backup, non è più un mio vicino lo cambio
+
+					}
+				}
 				delete(n.neighbours, neighbour)
 				delete(n.neighboursNeighbours, neighbour)
 			}
@@ -186,7 +221,7 @@ func (n *NodeServer) removeOldNeighbours() {
 		}
 	}
 }
-
+func (n *NodeServer) RemoveResourcesBackup
 func (n *NodeServer) SplitZone(ctx context.Context, newNode *pb.NewNodeInformation) (*pb.InformationToAddNode, error) {
 	log.Printf("Divido la zona con %s", newNode.Address)
 	point := Point{newNode.Point.X, newNode.Point.Y}
@@ -244,6 +279,7 @@ func (n *NodeServer) SplitZone(ctx context.Context, newNode *pb.NewNodeInformati
 		Coordinate: convertCoordinateToMessage(n.coordinates),
 		OriginNode: &pb.IPAddress{Address: n.address},
 	}
+	n.sendHeartBeatAllNeighbours()
 	return &pb.InformationToAddNode{NewCoordinate: convertCoordinateToMessage(newCoordinate), OldNode: originNode, NeighboursOldNode: neighboursCopy, Resources: resourceOfNeighbour}, nil
 }
 func volumeCoordinate(coordinate Coordinates) float32 {
@@ -272,7 +308,6 @@ func (n *NodeServer) AddNode(ctx context.Context, newNode *pb.NewNodeInformation
 				log.Printf("Non riesco a connettermi al nodo con zona piu grande, %v", err)
 				return n.SplitZone(context.Background(), newNode)
 			}
-			defer conn.Close()
 
 			client := pb.NewNodeServiceClient(conn)
 			return client.SplitZone(context.Background(), newNode)
@@ -294,7 +329,6 @@ func (n *NodeServer) AddNode(ctx context.Context, newNode *pb.NewNodeInformation
 			log.Printf("Impossibile connettersi al nodo %s: %v", nodeToRouting, err)
 			return nil, err
 		}
-		defer conn.Close()
 		nodeClient := pb.NewNodeServiceClient(conn)
 		return nodeClient.AddNode(context.Background(), newNode)
 	}
@@ -305,121 +339,123 @@ func (n *NodeServer) UnionZone(ctx context.Context, info *pb.InformationToAddNod
 		n.resources[r.Key] = r.Value
 	}
 	cooOldNode := convertCoordinateFromMessage(info.NewCoordinate)
-	if n.coordinates.MinX > cooOldNode.MinX {
-		n.coordinates.MinX = cooOldNode.MinX
-	}
-	if n.coordinates.MinY > cooOldNode.MinY {
-		n.coordinates.MinY = cooOldNode.MinY
-	}
-	if n.coordinates.MaxX < cooOldNode.MaxX {
-		n.coordinates.MaxX = cooOldNode.MaxX
-	}
-	if n.coordinates.MaxY < cooOldNode.MaxY {
-		n.coordinates.MaxY = cooOldNode.MaxY
-	}
+
+	// Calcolo nuova zona come bounding box
+	n.coordinates.MinX = float32(math.Min(float64(n.coordinates.MinX), float64(cooOldNode.MinX)))
+	n.coordinates.MinY = float32(math.Min(float64(n.coordinates.MinY), float64(cooOldNode.MinY)))
+	n.coordinates.MaxX = float32(math.Max(float64(n.coordinates.MaxX), float64(cooOldNode.MaxX)))
+	n.coordinates.MaxY = float32(math.Max(float64(n.coordinates.MaxY), float64(cooOldNode.MaxY)))
+	log.Printf("Le mie coordinate a seguito del unione sono x_min: %f, x_max: %f, y_min: %f, y_max: %f", n.coordinates.MinX, n.coordinates.MaxX, n.coordinates.MinY, n.coordinates.MaxY)
+
 	for _, neighbour := range info.NeighboursOldNode {
 		n.neighbours[neighbour.OriginNode.Address] = convertCoordinateFromMessage(neighbour.Coordinate)
 	}
-	n.removeOldNeighbours()
+	for neig, _ := range n.neighbours {
+		client, err := createClient(neig)
+		if err != nil {
+			log.Printf("Errore collegamento al nodo %s: %v", neig, err)
+		} else {
+			_, err = client.RemoveNodeAsNeighbour(context.Background(), info.OldNode.OriginNode)
+			if err != nil {
+				log.Printf("Errore rimuovere vicino nodo %s: %v", neig, err)
+			}
 
+		}
+
+	}
+	n.sendHeartBeatAllNeighbours()
+
+	return &pb.Bool{B: true}, nil
+}
+func (n *NodeServer) RemoveNodeAsNeighbour(ctx context.Context, neighbour *pb.IPAddress) (*pb.Bool, error) {
+	_, ok := n.neighbours[neighbour.Address]
+	if ok {
+		delete(n.neighbours, neighbour.Address)
+	}
 	return nil, nil
 }
-func (n *NodeServer) DeepSearch(ctx context.Context, nodes *pb.HeartBeatMessage) (*pb.HeartBeatMessage, error) {
-	minZone := float32(math.MaxFloat32)
-	var minNeighbour string
+func (n *NodeServer) searchBrother() string {
+	selfVolume := volumeCoordinate(n.coordinates)
 	for neighbour, coordinate := range n.neighbours {
-		//Cerchi sulla dimesione dove ti sei diviso
-		//siccome divido prima sulle x e poi sulle y, se è un quadrato l'ultima divisione è stata sulle y
-		if (n.coordinates.MaxX - n.coordinates.MinX) == (n.coordinates.MaxY - n.coordinates.MinY) {
-			if (n.coordinates.MaxX >= coordinate.MaxX) && (n.coordinates.MinX <= coordinate.MinX) {
-				if volumeCoordinate(n.coordinates) == volumeCoordinate(coordinate) {
-					//Ho trovato il fratello e ha la stessa dimensione
+		isSquare := (n.coordinates.MaxX - n.coordinates.MinX) == (n.coordinates.MaxY - n.coordinates.MinY)
+		isOnAxis := false
+		sameVolume := volumeCoordinate(coordinate) == selfVolume
 
-					return &pb.HeartBeatMessage{Nodes: append(nodes.Nodes,
-						&pb.NodeInformation{OriginNode: &pb.IPAddress{Address: neighbour},
-							Coordinate: convertCoordinateToMessage(coordinate)},
-						&pb.NodeInformation{OriginNode: &pb.IPAddress{Address: n.address},
-							Coordinate: convertCoordinateToMessage(n.coordinates)},
-					)}, nil
-				}
-				if volumeCoordinate(coordinate) < minZone {
-					minNeighbour = neighbour
-				}
-			}
+		if isSquare {
+			isOnAxis = n.coordinates.MaxX >= coordinate.MaxX && n.coordinates.MinX <= coordinate.MinX
 		} else {
-			if (n.coordinates.MaxY >= coordinate.MaxY) && (n.coordinates.MinY <= coordinate.MinY) {
-				if volumeCoordinate(n.coordinates) == volumeCoordinate(coordinate) {
-					//Ho trovato il fratello e ha la stessa dimensione
+			isOnAxis = n.coordinates.MaxY >= coordinate.MaxY && n.coordinates.MinY <= coordinate.MinY
+		}
 
-					return &pb.HeartBeatMessage{Nodes: append(nodes.Nodes,
-						&pb.NodeInformation{OriginNode: &pb.IPAddress{Address: neighbour},
-							Coordinate: convertCoordinateToMessage(coordinate)},
-						&pb.NodeInformation{OriginNode: &pb.IPAddress{Address: n.address},
-							Coordinate: convertCoordinateToMessage(n.coordinates)},
-					)}, nil
-				}
-				if volumeCoordinate(coordinate) < minZone {
-					minNeighbour = neighbour
-
-				}
-			}
+		if isOnAxis && sameVolume {
+			// fratello trovato
+			return neighbour
 		}
 	}
-	client, err := createClient(minNeighbour)
-	if err != nil {
-		log.Printf("Errore nel connettersi a %s nella deepSearch: %v", minNeighbour, err)
-		//todo cosa fare se vanno male le cose nella deep search
-	}
-	finalList, err := client.DeepSearch(ctx, nodes)
-	if err != nil {
-		log.Printf("Deep search andata male %v", err)
-	}
-	return &pb.HeartBeatMessage{Nodes: append(finalList.Nodes, &pb.NodeInformation{OriginNode: &pb.IPAddress{Address: n.address}, Coordinate: convertCoordinateToMessage(n.coordinates)})}, nil
+	return ""
 }
-func splitZones(nodes []Node) {
-	x_min := float32(math.MaxFloat32)
-	x_max := float32(0)
-	y_min := float32(math.MaxFloat32)
-	y_max := float32(0)
-	//Ricostruisci zona piu grande da dividere
-	for _, node := range nodes {
-		if node.Coordinates.MaxY > y_max {
-			y_max = node.Coordinates.MaxY
-		}
-		if node.Coordinates.MinY < y_min {
-			y_min = node.Coordinates.MinY
-		}
-		if node.Coordinates.MaxX > x_max {
-			x_max = node.Coordinates.MaxX
-		}
-		if node.Coordinates.MinX < x_min {
-			x_min = node.Coordinates.MinX
-		}
+func (n *NodeServer) changeZone(info *pb.Resources) {
+	n.coordinates = convertCoordinateFromMessage(info.CoordinateOldNode)
+	n.resources = map[string]string{}
+	n.neighboursNeighbours = map[string][]string{}
+	n.neighbours = map[string]Coordinates{}
+	for _, res := range info.Resources {
+		n.resources[res.Key] = res.Value
 	}
-	//Scegli nuove coordinate zone e mandale alle rispettive zone, fai in maniera sensata invio delle risorse e heartbeat
+	for _, nei := range info.NeighboursOldNode {
+		n.neighbours[nei.OriginNode.Address] = convertCoordinateFromMessage(nei.Coordinate)
+	}
+	n.sendHeartBeatAllNeighbours()
 }
 func (n *NodeServer) EntrustResources(ctx context.Context, info *pb.Resources) (*pb.Bool, error) {
-	//TODO PROVA DEEP SEARCH
-	unionNodes, err := n.DeepSearch(context.Background(), &pb.HeartBeatMessage{})
-	if err != nil {
-		log.Printf("La deep search è andata male entrust resours, %v", err)
-		//todo cosa fare se va male deep search
-	}
-	totalZones := float32(0)
-	nodesToUnion := make([]Node, 0, len(unionNodes.Nodes))
-	for _, node := range unionNodes.Nodes {
-		totalZones += volumeCoordinate(convertCoordinateFromMessage(node.Coordinate))
-		nodesToUnion = append(nodesToUnion, Node{Coordinates: convertCoordinateFromMessage(node.Coordinate), Address: node.OriginNode.Address})
-	}
-	if totalZones == volumeCoordinate(convertCoordinateFromMessage(info.CoordinateOldNode)) {
-		splitZones(nodesToUnion)
-	}
+	//Fa una deepsearch fino a trovare due fratelli
+	//Se ho un fratello, unisco le due zone lui si occupa delle zone unite e io mi vado ad'occupare della zona del nodo che se neva
+	//Se non ho un fratello, affido al mio vicino più piccolo le risorse e se ne occupa lui
+	log.Printf("Entrust resources")
+	brother := n.searchBrother()
+	if brother == "" {
+		log.Print("Non ho un fratello, affido le risorse al mio vicino più piccolo")
+		minVol := float32(math.MaxFloat32)
+		var minN string
+		for nei, coo := range n.neighbours {
+			if volumeCoordinate(coo) < minVol {
+				minN = nei
+			}
+		}
+		client, err := createClient(minN)
+		if err != nil {
+			log.Printf("Non sono riuscito a connettermi al vicino più piccolo %s", minN)
+			//todo quando non riesco affida a un altro vicino
+			return nil, err
+		}
+		client.EntrustResources(context.Background(), info)
+	} else {
+		//Ho trovato un fratello
+		client, err := createClient(brother)
+		if err != nil {
+			log.Printf("Non sono riuscito a connettermi a mio fratello %s", brother)
+			//todo quando non riesco affida a un altro vicino
+			return nil, err
+		}
+		//Lui si prende la mia zona
+		neighboursCopy := make([]*pb.NodeInformation, 0, len(n.neighbours))
+		for ne, coordinate := range n.neighbours {
+			neighboursCopy = append(neighboursCopy, &pb.NodeInformation{
+				Coordinate: convertCoordinateToMessage(coordinate),
+				OriginNode: &pb.IPAddress{Address: ne},
+			})
+		}
+		resourcesToSend := make([]*pb.Resource, 0)
+		for key, value := range n.resources {
+			resourcesToSend = append(resourcesToSend, &pb.Resource{Key: key, Value: value})
+			delete(n.resources, key)
+		}
+		oldNode := pb.NodeInformation{OriginNode: &pb.IPAddress{Address: n.address}}
 
-	//altrimenti
-	//se volume zona unita == zona nodo da rimuovere OK unisci con zona del nodo da eliminare e spartisci la zona tra i nodi
-	//altrimenti cerca fratello zona unita
-	for _, resource := range info.Resources {
-		n.tempResource[resource.Key] = resource.Value
+		client.UnionZone(context.Background(), &pb.InformationToAddNode{NewCoordinate: convertCoordinateToMessage(n.coordinates), Resources: resourcesToSend, NeighboursOldNode: neighboursCopy, OldNode: &oldNode})
+		//Io mi prendo la zona del nodo che se ne va
+		n.changeZone(info)
+
 	}
 	return nil, nil
 }
@@ -444,10 +480,20 @@ func (n *NodeServer) removeNode() {
 		delete(n.resources, key)
 	}
 	var sendTo string
+	selfVolume := volumeCoordinate(n.coordinates)
+	for neighbour, coordinate := range n.neighbours {
+		isSquare := (n.coordinates.MaxX - n.coordinates.MinX) == (n.coordinates.MaxY - n.coordinates.MinY)
+		isOnAxis := false
+		sameVolume := volumeCoordinate(coordinate) == selfVolume
 
-	for neighbour, coordinates := range n.neighbours {
-		if volumeCoordinate(n.coordinates) == volumeCoordinate(coordinates) {
-			//create message to new node
+		if isSquare {
+			isOnAxis = n.coordinates.MaxX >= coordinate.MaxX && n.coordinates.MinX <= coordinate.MinX
+		} else {
+			isOnAxis = n.coordinates.MaxY >= coordinate.MaxY && n.coordinates.MinY <= coordinate.MinY
+		}
+
+		if isOnAxis && sameVolume {
+			//create message to  nodeToSend
 			neighboursCopy := make([]*pb.NodeInformation, 0, len(n.neighbours))
 			for ne, coordinate := range n.neighbours {
 				neighboursCopy = append(neighboursCopy, &pb.NodeInformation{
@@ -455,13 +501,14 @@ func (n *NodeServer) removeNode() {
 					OriginNode: &pb.IPAddress{Address: ne},
 				})
 			}
-			client, err := createClient(neighbour)
+			clientNode, err := createClient(neighbour)
 			if err != nil {
-				log.Printf("Impossibile unire zone, %v", err)
+				log.Printf("Impossibile connettersi al nodo %s per unire zone, %v", neighbour, err)
 			} else {
-				_, err := client.UnionZone(context.Background(), &pb.InformationToAddNode{NewCoordinate: convertCoordinateToMessage(n.coordinates), Resources: resourcesToSend, NeighboursOldNode: neighboursCopy})
+				oldNode := pb.NodeInformation{OriginNode: &pb.IPAddress{Address: n.address}}
+				_, err := clientNode.UnionZone(context.Background(), &pb.InformationToAddNode{NewCoordinate: convertCoordinateToMessage(n.coordinates), Resources: resourcesToSend, NeighboursOldNode: neighboursCopy, OldNode: &oldNode})
 				if err != nil {
-					log.Printf("Impossibile unire zone, %v", err)
+					log.Printf("Errore nell'unire le zone, %v", err)
 				} else {
 					bootstrapAddress := "bootstrap:50051"
 
@@ -469,93 +516,132 @@ func (n *NodeServer) removeNode() {
 					if err != nil {
 						log.Fatalf("Impossibile connettersi al bootstrap node %s: %v", bootstrapAddress, err)
 					}
-					defer conn.Close()
 
 					client := pb.NewBootstrapServiceClient(conn)
 					client.RemoveNode(context.Background(), &pb.IPAddress{Address: n.address})
+					log.Fatalf("Me ne sono andato")
 					return
 				}
 			}
 
 		}
-		volume := volumeCoordinate(coordinates)
-		if volume < minVolume {
-			minVolume = volume
-			sendTo = neighbour
+		if isOnAxis {
+			volume := volumeCoordinate(coordinate)
+			if volume < minVolume {
+				minVolume = volume
+				sendTo = neighbour
+			}
 		}
+
 	}
 	client, err := createClient(sendTo)
+	log.Printf("Lascio le risorse a %s, ci pensera lui a torvare chi si occupa della zona", sendTo)
 	if err != nil {
 		log.Printf("Impossibile connettersi al nodo %s, %v", sendTo, err)
 		delete(n.neighbours, sendTo)
 		n.removeNode()
 	} else {
-		_, err := client.EntrustResources(context.Background(), &pb.Resources{Resources: resourcesToSend})
+		client.RemoveNodeAsNeighbour(context.Background(), &pb.IPAddress{Address: n.address})
+		_, err := client.EntrustResources(context.Background(), &pb.Resources{Resources: resourcesToSend, CoordinateOldNode: convertCoordinateToMessage(n.coordinates)})
 		if err != nil {
 			log.Printf("Impossibile affidare risorse al nodo %s, %v", sendTo, err)
 			delete(n.neighbours, sendTo)
 			n.removeNode()
 		}
+		log.Fatalf("Me ne vado")
 	}
 }
-
-func (n *NodeServer) HeartBeat(ctx context.Context, neighbourNeighbour *pb.HeartBeatMessage) (*pb.HeartBeatMessage, error) { //  Quando ricevi heartbeat aggiorna vicini e le loro coordinate
+func (n *NodeServer) HeartBeat(ctx context.Context, infoNeighbour *pb.HeartBeatMessage) (*pb.HeartBeatMessage, error) { //  Quando ricevi heartbeat aggiorna vicini e le loro coordinate
 	log.Printf("HeartBeat")
-	addressNeighboursNeighbour := make([]string, 0, len(neighbourNeighbour.Nodes))
-	for _, neighbourMessage := range neighbourNeighbour.Nodes {
+	addressNeighboursNeighbour := make([]string, 0, len(infoNeighbour.Nodes))
+	for _, neighbourMessage := range infoNeighbour.Nodes {
 		neighbour := convertNodeInformationFromMessage(neighbourMessage)
-		if neighbour.Address != neighbourNeighbour.FromWho {
+		if neighbour.Address != infoNeighbour.FromWho {
 			addressNeighboursNeighbour = append(addressNeighboursNeighbour, neighbour.Address)
 		}
 		n.neighbours[neighbour.Address] = neighbour.Coordinates
 	}
-	n.neighboursNeighbours[neighbourNeighbour.FromWho] = addressNeighboursNeighbour
+	n.neighboursNeighbours[infoNeighbour.FromWho] = addressNeighboursNeighbour
+	n.backupNodesNeighbour[infoNeighbour.FromWho] = infoNeighbour.BackupNodes
 	n.removeOldNeighbours()
-	log.Printf("i vicini a seguito heartbeat %v", n.neighbours)
-	log.Printf("i vicini di %s sono: %v", neighbourNeighbour.FromWho, n.neighboursNeighbours[neighbourNeighbour.FromWho])
-
-	return neighbourNeighbour, nil
-}
-
-// Periodicamente e quando viene aggiunto come nodo, il nodo manda a tutti i suoi vicini le sue coordinate e i vicini (aggiornamento soft)
-func (n *NodeServer) sendHeartBeatAllNeighbours() {
-	for {
-		log.Printf("Sto facendo il send")
-		//Crea messaggio con tutti i vicini e te stesso
-		heartbeat := make([]*pb.NodeInformation, 0, len(n.neighbours)+1) // +1 per includere il nodo stesso
-
-		// Aggiungi i vicini
-		for neighbour, coordinates := range n.neighbours {
-			heartbeat = append(heartbeat, &pb.NodeInformation{
-				OriginNode: &pb.IPAddress{Address: neighbour},
-				Coordinate: convertCoordinateToMessage(coordinates),
-			})
-		}
-
-		// Aggiungi il nodo stesso
-		heartbeat = append(heartbeat, &pb.NodeInformation{
-			OriginNode: &pb.IPAddress{Address: n.address},
-			Coordinate: convertCoordinateToMessage(n.coordinates),
-		})
-
-		//Invia a tutti i vicini heartbeat
-		for neighbour := range n.neighbours {
-			conn, err := grpc.Dial(neighbour, grpc.WithInsecure())
-			if err != nil {
-				log.Printf("Impossibile connettersi al nodo %s: %v", neighbour, err)
-				//TODO recupero da nodo non funzionante?? O quando non ricevo il segnale
-			} else {
-				nodeClient := pb.NewNodeServiceClient(conn)
-				_, err = nodeClient.HeartBeat(context.Background(), &pb.HeartBeatMessage{Nodes: heartbeat, FromWho: n.address})
-				if err != nil {
-					log.Printf("heartbeat andato male con nodo %s: %v", neighbour, err)
+	if len(n.neighbours)>=NREP && len(n.backupNodes)<2{
+		for k := range n.neighbours {
+			present := false
+			for _,x := range n.backupNodes{
+				if x==k{
+					present = true
+				}
+			}
+			if !present {
+				n.backupNodes = append(n.backupNodes, k)
+				if len(n.backupNodes) == NREP {
+					break
 				}
 			}
 
 		}
-		time.Sleep(120 * time.Second)
+	}
+	log.Printf("i vicini a seguito heartbeat %v", n.neighbours)
+	log.Printf("i vicini di %s sono: %v", infoNeighbour.FromWho, n.neighboursNeighbours[infoNeighbour.FromWho])
+
+	return nil, nil
+}
+
+// Periodicamente e quando viene aggiunto come nodo, il nodo manda a tutti i suoi vicini le sue coordinate e i vicini (aggiornamento soft)
+func (n *NodeServer) sendHeartBeatAllNeighbours() {
+
+	log.Printf("Sto facendo il send")
+	//Crea messaggio con tutti i vicini e te stesso
+	heartbeat := make([]*pb.NodeInformation, 0, len(n.neighbours)+1) // +1 per includere il nodo stesso
+
+	// Aggiungi i vicini
+	for neighbour, coordinates := range n.neighbours {
+		heartbeat = append(heartbeat, &pb.NodeInformation{
+			OriginNode: &pb.IPAddress{Address: neighbour},
+			Coordinate: convertCoordinateToMessage(coordinates),
+		})
 	}
 
+	// Aggiungi il nodo stesso
+	heartbeat = append(heartbeat, &pb.NodeInformation{
+		OriginNode: &pb.IPAddress{Address: n.address},
+		Coordinate: convertCoordinateToMessage(n.coordinates),
+	})
+
+	//Invia a tutti i vicini heartbeat
+	for neighbour := range n.neighbours {
+		conn, err := grpc.Dial(neighbour, grpc.WithInsecure())
+		if err != nil {
+			log.Printf("Impossibile connettersi al nodo %s: %v", neighbour, err)
+			//TODO recupero da nodo non funzionante?? O quando non ricevo il segnale
+		} else {
+			nodeClient := pb.NewNodeServiceClient(conn)
+			_, err = nodeClient.HeartBeat(context.Background(), &pb.HeartBeatMessage{Nodes: heartbeat, FromWho: n.address, BackupNodes: n.backupNodes})
+			if err != nil {
+				log.Printf("heartbeat andato male con nodo %s: %v", neighbour, err)
+			}
+		}
+
+	}
+
+}
+func (n *NodeServer) periodicHeartBeat() {
+	for {
+		n.sendHeartBeatAllNeighbours()
+		time.Sleep(120 * time.Second)
+	}
+}
+func (n* NodeServer) HeartBeatBackup(ctx context.Context, info *pb.Bool) (*pb.Bool, error) {
+	//todo azzera timer
+	return nil,nil
+}
+func (n *NodeServer) periodicHeartBeatBackup() {
+	for {
+		for _, backupNode := range n.backupNodes {
+			client,_ := createClient(backupNode)
+			client.HeartBeatBackup(context.Background(),&pb.Bool{})
+		}
+	}
 }
 func (n *NodeServer) startGrpcServer() {
 	// Avvio del server gRPC
@@ -573,6 +659,40 @@ func (n *NodeServer) startGrpcServer() {
 	}
 
 }
+func abs(f float32) float32 {
+	if f < 0 {
+		return -f
+	}
+	return f
+}
+
+func randomString(n int) string {
+	const letters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	b := make([]byte, n)
+	for i := range b {
+		b[i] = letters[rand.Intn(len(letters))]
+	}
+	return string(b)
+}
+
+func findStringForPoint(targetX, targetY, tolerance float32) string {
+	rand.Seed(time.Now().UnixNano())
+	attempts := 0
+	for {
+		s := randomString(12)
+		p := stringToPoint(s)
+
+		if abs(p.X-targetX) <= tolerance && abs(p.Y-targetY) <= tolerance {
+			fmt.Printf("Trovata dopo %d tentativi: %s => (X: %.6f, Y: %.6f)\n", attempts, s, p.X, p.Y)
+			return s
+		}
+
+		attempts++
+		if attempts%100000 == 0 {
+			fmt.Printf("Tentativi: %d... ancora niente (ultimo X: %.6f, Y: %.6f)\n", attempts, p.X, p.Y)
+		}
+	}
+}
 func main() {
 	var coordinate Coordinates
 	bootstrapAddress := "bootstrap:50051"
@@ -583,7 +703,8 @@ func main() {
 		neighbours:           map[string]Coordinates{},
 		neighboursNeighbours: map[string][]string{},
 		resources:            map[string]string{},
-		tempResource:         map[string]string{},
+		nodesIBackup:         map[string]map[string]string{},
+		backupNodes:          []string{},
 		address:              myAddress,
 	}
 	// Connessione al Bootstrap Server
@@ -591,7 +712,6 @@ func main() {
 	if err != nil {
 		log.Fatalf("Impossibile connettersi al bootstrap node %s: %v", bootstrapAddress, err)
 	}
-	defer conn.Close()
 
 	client := pb.NewBootstrapServiceClient(conn)
 	// Ottenere il nodo attivo
@@ -650,13 +770,21 @@ func main() {
 	log.Printf("Le mie coordinate sono x_min: %f, x_max: %f, y_min: %f, y_max: %f", node.coordinates.MinX, node.coordinates.MaxX, node.coordinates.MinY, node.coordinates.MaxY)
 	node.removeOldNeighbours()
 	log.Printf("my neighbours are %v", node.neighbours)
-
+	//Devo scegliere quali nodi avranno funzione di backup (random)
+	for k := range node.neighbours {
+		node.backupNodes = append(node.backupNodes, k)
+		if len(node.backupNodes) == int(math.Min(float64(NREP), float64(len(node.neighbours)))) {
+			break
+		}
+	}
 	//Avvio procedura heartbeat
-	go node.sendHeartBeatAllNeighbours()
+	go node.periodicHeartBeat()
+	go node.periodicHeartBeatBackup()
 	go node.startGrpcServer()
+
 	reader := bufio.NewReader(os.Stdin)
 	for {
-		fmt.Println("1) Input resource \n2) Get resource \n3) Delete resource \n4) Print all resources")
+		fmt.Println("1) Input resource \n2) Get resource \n3) Delete resource \n4) Print all resources\n5)Remove Node")
 		fmt.Print("Enter choice: ")
 		choice, errScan := reader.ReadString('\n')
 		if errScan != nil {
@@ -708,6 +836,34 @@ func main() {
 		case "4":
 			for n, value := range node.resources {
 				fmt.Printf("%s: %s\n", n, value)
+			}
+		case "5":
+			node.removeNode()
+		case "6":
+			fmt.Print("Enter x: ")
+			point, _ := reader.ReadString('\n')
+			point = strings.TrimSpace(point)
+			x, errF := strconv.ParseFloat(point, 32)
+			if errF != nil {
+				log.Printf("Errore conversione a float")
+			} else {
+				fmt.Print("Enter y: ")
+				point, _ = reader.ReadString('\n')
+				point = strings.TrimSpace(point)
+				y, errF := strconv.ParseFloat(point, 32)
+				if errF != nil {
+					log.Printf("Errore conversione a float")
+				} else {
+					k := findStringForPoint(float32(x), float32(y), 0.1)
+					toWho, err := node.AddResource(context.Background(), &pb.Resource{Key: k, Value: k})
+					if err != nil {
+						fmt.Printf("Errore nell'aggiunta della risorsa: %v", err)
+
+					} else {
+						fmt.Printf("risorsa aggiunta al nodo %s\n", toWho.GetAddress())
+					}
+				}
+
 			}
 
 		default:

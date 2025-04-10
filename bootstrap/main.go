@@ -18,9 +18,11 @@ type BootstrapServer struct {
 }
 
 func (b *BootstrapServer) FindActiveNode(ctx context.Context, address *pb.AddressList) (*pb.IPAddress, error) {
-	log.Printf("Tutti i nodi che ho sono %v", b.nodes)
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	if len(b.nodes) == 0 {
+		b.nodes = append(b.nodes, address.Ad[0])
+	}
 	excluded := address.Ad
 	excludedSet := make(map[string]struct{}, len(excluded))
 	for _, addr := range excluded {
@@ -46,9 +48,15 @@ func (b *BootstrapServer) FindActiveNode(ctx context.Context, address *pb.Addres
 	return &pb.IPAddress{Address: validNodes[i]}, nil
 }
 func (b *BootstrapServer) AddNode(ctx context.Context, address *pb.IPAddress) (*pb.IPAddress, error) {
-	log.Println("Adding node:", address)
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	for _, node := range b.nodes {
+		if node == address.Address {
+			return nil, nil
+		}
+	}
+	log.Println("Adding node:", address)
+
 	b.nodes = append(b.nodes, address.Address)
 	return &pb.IPAddress{Address: address.Address}, nil
 }

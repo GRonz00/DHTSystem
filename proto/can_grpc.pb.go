@@ -197,15 +197,19 @@ var BootstrapService_ServiceDesc = grpc.ServiceDesc{
 }
 
 const (
-	NodeService_AddNode_FullMethodName          = "/proto.NodeService/addNode"
-	NodeService_HeartBeat_FullMethodName        = "/proto.NodeService/heartBeat"
-	NodeService_AddResource_FullMethodName      = "/proto.NodeService/addResource"
-	NodeService_GetResource_FullMethodName      = "/proto.NodeService/getResource"
-	NodeService_DeleteResource_FullMethodName   = "/proto.NodeService/deleteResource"
-	NodeService_UnionZone_FullMethodName        = "/proto.NodeService/unionZone"
-	NodeService_EntrustResources_FullMethodName = "/proto.NodeService/entrustResources"
-	NodeService_SplitZone_FullMethodName        = "/proto.NodeService/splitZone"
-	NodeService_DeepSearch_FullMethodName       = "/proto.NodeService/deepSearch"
+	NodeService_AddNode_FullMethodName                    = "/proto.NodeService/addNode"
+	NodeService_HeartBeat_FullMethodName                  = "/proto.NodeService/heartBeat"
+	NodeService_AddResource_FullMethodName                = "/proto.NodeService/addResource"
+	NodeService_GetResource_FullMethodName                = "/proto.NodeService/getResource"
+	NodeService_DeleteResource_FullMethodName             = "/proto.NodeService/deleteResource"
+	NodeService_UnionZone_FullMethodName                  = "/proto.NodeService/unionZone"
+	NodeService_EntrustResources_FullMethodName           = "/proto.NodeService/entrustResources"
+	NodeService_SplitZone_FullMethodName                  = "/proto.NodeService/splitZone"
+	NodeService_UpdateZone_FullMethodName                 = "/proto.NodeService/updateZone"
+	NodeService_RemoveNodeAsNeighbour_FullMethodName      = "/proto.NodeService/removeNodeAsNeighbour"
+	NodeService_AddResourceToBackupNode_FullMethodName    = "/proto.NodeService/addResourceToBackupNode"
+	NodeService_DeleteResourceToBackupNode_FullMethodName = "/proto.NodeService/deleteResourceToBackupNode"
+	NodeService_HeartBeatBackup_FullMethodName            = "/proto.NodeService/heartBeatBackup"
 )
 
 // NodeServiceClient is the client API for NodeService service.
@@ -220,7 +224,11 @@ type NodeServiceClient interface {
 	UnionZone(ctx context.Context, in *InformationToAddNode, opts ...grpc.CallOption) (*Bool, error)
 	EntrustResources(ctx context.Context, in *Resources, opts ...grpc.CallOption) (*Bool, error)
 	SplitZone(ctx context.Context, in *NewNodeInformation, opts ...grpc.CallOption) (*InformationToAddNode, error)
-	DeepSearch(ctx context.Context, in *HeartBeatMessage, opts ...grpc.CallOption) (*HeartBeatMessage, error)
+	UpdateZone(ctx context.Context, in *Coordinate, opts ...grpc.CallOption) (*Bool, error)
+	RemoveNodeAsNeighbour(ctx context.Context, in *IPAddress, opts ...grpc.CallOption) (*Bool, error)
+	AddResourceToBackupNode(ctx context.Context, in *AddBackup, opts ...grpc.CallOption) (*Bool, error)
+	DeleteResourceToBackupNode(ctx context.Context, in *DeleteBackup, opts ...grpc.CallOption) (*Bool, error)
+	HeartBeatBackup(ctx context.Context, in *Bool, opts ...grpc.CallOption) (*Bool, error)
 }
 
 type nodeServiceClient struct {
@@ -311,10 +319,50 @@ func (c *nodeServiceClient) SplitZone(ctx context.Context, in *NewNodeInformatio
 	return out, nil
 }
 
-func (c *nodeServiceClient) DeepSearch(ctx context.Context, in *HeartBeatMessage, opts ...grpc.CallOption) (*HeartBeatMessage, error) {
+func (c *nodeServiceClient) UpdateZone(ctx context.Context, in *Coordinate, opts ...grpc.CallOption) (*Bool, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(HeartBeatMessage)
-	err := c.cc.Invoke(ctx, NodeService_DeepSearch_FullMethodName, in, out, cOpts...)
+	out := new(Bool)
+	err := c.cc.Invoke(ctx, NodeService_UpdateZone_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *nodeServiceClient) RemoveNodeAsNeighbour(ctx context.Context, in *IPAddress, opts ...grpc.CallOption) (*Bool, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Bool)
+	err := c.cc.Invoke(ctx, NodeService_RemoveNodeAsNeighbour_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *nodeServiceClient) AddResourceToBackupNode(ctx context.Context, in *AddBackup, opts ...grpc.CallOption) (*Bool, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Bool)
+	err := c.cc.Invoke(ctx, NodeService_AddResourceToBackupNode_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *nodeServiceClient) DeleteResourceToBackupNode(ctx context.Context, in *DeleteBackup, opts ...grpc.CallOption) (*Bool, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Bool)
+	err := c.cc.Invoke(ctx, NodeService_DeleteResourceToBackupNode_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *nodeServiceClient) HeartBeatBackup(ctx context.Context, in *Bool, opts ...grpc.CallOption) (*Bool, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Bool)
+	err := c.cc.Invoke(ctx, NodeService_HeartBeatBackup_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -333,7 +381,11 @@ type NodeServiceServer interface {
 	UnionZone(context.Context, *InformationToAddNode) (*Bool, error)
 	EntrustResources(context.Context, *Resources) (*Bool, error)
 	SplitZone(context.Context, *NewNodeInformation) (*InformationToAddNode, error)
-	DeepSearch(context.Context, *HeartBeatMessage) (*HeartBeatMessage, error)
+	UpdateZone(context.Context, *Coordinate) (*Bool, error)
+	RemoveNodeAsNeighbour(context.Context, *IPAddress) (*Bool, error)
+	AddResourceToBackupNode(context.Context, *AddBackup) (*Bool, error)
+	DeleteResourceToBackupNode(context.Context, *DeleteBackup) (*Bool, error)
+	HeartBeatBackup(context.Context, *Bool) (*Bool, error)
 	mustEmbedUnimplementedNodeServiceServer()
 }
 
@@ -368,8 +420,20 @@ func (UnimplementedNodeServiceServer) EntrustResources(context.Context, *Resourc
 func (UnimplementedNodeServiceServer) SplitZone(context.Context, *NewNodeInformation) (*InformationToAddNode, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method SplitZone not implemented")
 }
-func (UnimplementedNodeServiceServer) DeepSearch(context.Context, *HeartBeatMessage) (*HeartBeatMessage, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method DeepSearch not implemented")
+func (UnimplementedNodeServiceServer) UpdateZone(context.Context, *Coordinate) (*Bool, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method UpdateZone not implemented")
+}
+func (UnimplementedNodeServiceServer) RemoveNodeAsNeighbour(context.Context, *IPAddress) (*Bool, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method RemoveNodeAsNeighbour not implemented")
+}
+func (UnimplementedNodeServiceServer) AddResourceToBackupNode(context.Context, *AddBackup) (*Bool, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method AddResourceToBackupNode not implemented")
+}
+func (UnimplementedNodeServiceServer) DeleteResourceToBackupNode(context.Context, *DeleteBackup) (*Bool, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method DeleteResourceToBackupNode not implemented")
+}
+func (UnimplementedNodeServiceServer) HeartBeatBackup(context.Context, *Bool) (*Bool, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method HeartBeatBackup not implemented")
 }
 func (UnimplementedNodeServiceServer) mustEmbedUnimplementedNodeServiceServer() {}
 func (UnimplementedNodeServiceServer) testEmbeddedByValue()                     {}
@@ -536,20 +600,92 @@ func _NodeService_SplitZone_Handler(srv interface{}, ctx context.Context, dec fu
 	return interceptor(ctx, in, info, handler)
 }
 
-func _NodeService_DeepSearch_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(HeartBeatMessage)
+func _NodeService_UpdateZone_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(Coordinate)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(NodeServiceServer).DeepSearch(ctx, in)
+		return srv.(NodeServiceServer).UpdateZone(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: NodeService_DeepSearch_FullMethodName,
+		FullMethod: NodeService_UpdateZone_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(NodeServiceServer).DeepSearch(ctx, req.(*HeartBeatMessage))
+		return srv.(NodeServiceServer).UpdateZone(ctx, req.(*Coordinate))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _NodeService_RemoveNodeAsNeighbour_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(IPAddress)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(NodeServiceServer).RemoveNodeAsNeighbour(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: NodeService_RemoveNodeAsNeighbour_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(NodeServiceServer).RemoveNodeAsNeighbour(ctx, req.(*IPAddress))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _NodeService_AddResourceToBackupNode_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AddBackup)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(NodeServiceServer).AddResourceToBackupNode(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: NodeService_AddResourceToBackupNode_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(NodeServiceServer).AddResourceToBackupNode(ctx, req.(*AddBackup))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _NodeService_DeleteResourceToBackupNode_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DeleteBackup)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(NodeServiceServer).DeleteResourceToBackupNode(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: NodeService_DeleteResourceToBackupNode_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(NodeServiceServer).DeleteResourceToBackupNode(ctx, req.(*DeleteBackup))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _NodeService_HeartBeatBackup_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(Bool)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(NodeServiceServer).HeartBeatBackup(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: NodeService_HeartBeatBackup_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(NodeServiceServer).HeartBeatBackup(ctx, req.(*Bool))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -594,8 +730,24 @@ var NodeService_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _NodeService_SplitZone_Handler,
 		},
 		{
-			MethodName: "deepSearch",
-			Handler:    _NodeService_DeepSearch_Handler,
+			MethodName: "updateZone",
+			Handler:    _NodeService_UpdateZone_Handler,
+		},
+		{
+			MethodName: "removeNodeAsNeighbour",
+			Handler:    _NodeService_RemoveNodeAsNeighbour_Handler,
+		},
+		{
+			MethodName: "addResourceToBackupNode",
+			Handler:    _NodeService_AddResourceToBackupNode_Handler,
+		},
+		{
+			MethodName: "deleteResourceToBackupNode",
+			Handler:    _NodeService_DeleteResourceToBackupNode_Handler,
+		},
+		{
+			MethodName: "heartBeatBackup",
+			Handler:    _NodeService_HeartBeatBackup_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
