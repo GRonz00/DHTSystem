@@ -20,6 +20,7 @@ import (
 )
 
 const NREP = 2
+const HEARTBEAT_INTERVAL = 120
 
 type Coordinates struct {
 	MinX    float32
@@ -42,12 +43,60 @@ type NodeServer struct {
 	coordinates          Coordinates
 	address              string
 	neighbours           map[string]Coordinates //Key=address mappa con le coordinate del vicino
-	neighboursNeighbours map[string][]string    //Mappa con i vicini del vicino, usata in caso di failure per takeover
-	resources            map[string]string      //La chiave è il nome della risorsa (La posizione è data dal hash del nome)
-	backupNodes          []string               //Nodi che si occupano del backup delle mie risorse (scelti casualmente tra i vicini,
+	heartBeatTimer       map[string]*time.Timer
+	neighboursNeighbours map[string][]string //Mappa con i vicini del vicino, usata in caso di failure per takeover
+	resources            map[string]string   //La chiave è il nome della risorsa (La posizione è data dal hash del nome)
+	backupNodes          []string            //Nodi che si occupano del backup delle mie risorse (scelti casualmente tra i vicini,
 	// cosi so se sono ancora attivi ecc.) Il numero è dato dal min(N rep, #vicini)
 	backupNodesNeighbour map[string][]string          //In caso di failure il vicino che deve recuperare deve sapere chi detiene le risorse
 	nodesIBackup         map[string]map[string]string //Backup risorse altri nodi (Cosi conosco sia i nodi a cui faccio da backup che le loro risorse)
+	backupTimer          map[string]*time.Timer
+}
+
+func (n *NodeServer) StartOrResetHeartBeat(id string, duration time.Duration) {
+	if timer, exists := n.heartBeatTimer[id]; exists {
+		if !timer.Stop() {
+			<-timer.C
+		}
+	}
+
+	n.heartBeatTimer[id] = time.AfterFunc(duration, func() {
+		n.startTakeover(id)
+		delete(n.heartBeatTimer, id)
+	})
+}
+func (n *NodeServer) StartOrResetBackup(id string, duration time.Duration) {
+	if timer, exists := n.heartBeatTimer[id]; exists {
+		if !timer.Stop() {
+			<-timer.C
+		}
+	}
+
+	n.heartBeatTimer[id] = time.AfterFunc(duration, func() {
+		n.changeBackup(id) // chiamata al metodo con receiver
+		delete(n.heartBeatTimer, id)
+	})
+}
+func (n *NodeServer) changeBackup(id string) {
+	bootClient, _ := createBootstrapClient("bootstrap:50051")
+	backup, err := bootClient.FindActiveNode(context.Background(), &pb.AddressList{Ad: append(n.backupNodes, n.address)})
+	if err != nil {
+		log.Printf("Non è stato trovato un nodo disponibile per sostituire backup")
+	} else {
+		n.backupNodes = append(n.backupNodes, backup.Address)
+		client, _ := createClient(backup.Address) //todo controllo errore
+		resourceOfNeighbour := make([]*pb.Resource, 0, len(n.resources))
+		for key, value := range n.resources {
+			resourceOfNeighbour = append(resourceOfNeighbour, &pb.Resource{Key: key, Value: value})
+		}
+		client.AddResourcesBackup(context.Background(), &pb.ResourcesBackup{Resources: resourceOfNeighbour, Address: n.address})
+	}
+	for i, node := range n.backupNodes {
+		if node == id {
+			n.backupNodes = append(n.backupNodes[:i], n.backupNodes[i+1:]...)
+		}
+	}
+
 }
 
 func (n *NodeServer) contain(point Point) bool {
@@ -207,16 +256,12 @@ func (n *NodeServer) removeOldNeighbours() {
 			(coordinates.CenterY <= n.coordinates.MaxY && coordinates.CenterY >= n.coordinates.MinY)) || //e allo stesso tempo è centrato rispetto alle y (non considero vicini quelli che toccano solo un punto, con pochi nodi sarebbero quasi tutti vicini)
 			(n.coordinates.MaxY == coordinates.MinY || n.coordinates.MinY == coordinates.MaxY) && //stesso ragionamento assi invertite
 				(coordinates.CenterX <= n.coordinates.MaxX && coordinates.CenterX >= n.coordinates.MinX)) || neighbour == n.address {
-			_, ok := n.neighbours[neighbour]
-			if ok {
-				for _, backup := range n.backupNodes {
-					if neighbour == backup { //Quello che mi faceva da backup, non è più un mio vicino lo cambio
-
-					}
-				}
-				delete(n.neighbours, neighbour)
-				delete(n.neighboursNeighbours, neighbour)
+			delete(n.neighbours, neighbour)
+			delete(n.neighboursNeighbours, neighbour)
+			if _, ok := n.heartBeatTimer[neighbour]; ok {
+				delete(n.heartBeatTimer, neighbour)
 			}
+
 			log.Printf("Ho rimosso il nodo %s come vicino", neighbour)
 		}
 	}
@@ -280,7 +325,7 @@ func (n *NodeServer) SplitZone(ctx context.Context, newNode *pb.NewNodeInformati
 	//Devo tenere aggiornate le copie di backup
 	for _, backup := range n.backupNodes {
 		backupClient, _ := createClient(backup)
-		backupClient.AddResourcesBackup(context.Background(), &pb.ResourcesBackup{Address: n.address, Resources: resourceOfNeighbour})
+		backupClient.DeleteResourcesBackup(context.Background(), &pb.ResourcesBackup{Address: n.address, Resources: resourceOfNeighbour})
 	}
 	//create message to new node
 	neighboursCopy := make([]*pb.NodeInformation, 0, len(n.neighbours)) // Slice con capacità pre-allocata, ma vuota
@@ -292,6 +337,7 @@ func (n *NodeServer) SplitZone(ctx context.Context, newNode *pb.NewNodeInformati
 	}
 
 	n.neighbours[newNode.Address.GetAddress()] = newCoordinate
+	n.StartOrResetHeartBeat(newNode.Address.GetAddress(), time.Second*HEARTBEAT_INTERVAL*2)
 	n.removeOldNeighbours()
 	log.Printf("my new neighbours are %v", n.neighbours)
 
@@ -433,6 +479,12 @@ func (n *NodeServer) searchBrother() string {
 func (n *NodeServer) changeZone(info *pb.Resources) {
 	n.coordinates = convertCoordinateFromMessage(info.CoordinateOldNode)
 	n.resources = map[string]string{}
+	n.heartBeatTimer = map[string]*time.Timer{}
+	for _, backup := range n.backupNodes {
+		client, _ := createClient(backup)
+		client.DeleteAllResourcesBackup(context.Background(), &pb.IPAddress{Address: n.address})
+		client.AddResourcesBackup(context.Background(), &pb.ResourcesBackup{Resources: info.Resources, Address: n.address})
+	}
 
 	n.neighboursNeighbours = map[string][]string{}
 	n.neighbours = map[string]Coordinates{}
@@ -511,6 +563,15 @@ func createClient(address string) (pb.NodeServiceClient, error) {
 	}
 
 	return pb.NewNodeServiceClient(conn), nil
+}
+func createBootstrapClient(address string) (pb.BootstrapServiceClient, error) {
+	conn, err := grpc.Dial(address, grpc.WithInsecure())
+	if err != nil {
+		log.Printf("Impossibile connettersi al nodo %s: %v", address, err)
+		return nil, err
+	}
+
+	return pb.NewBootstrapServiceClient(conn), nil
 }
 func (n *NodeServer) removeNode() {
 	if len(n.neighbours) == 0 {
@@ -595,6 +656,29 @@ func (n *NodeServer) removeNode() {
 		log.Fatalf("Me ne vado")
 	}
 }
+func (n *NodeServer) Takeover(ctx context.Context, tm *pb.TakeoverMessage) (*pb.Bool, error) {
+	if volumeCoordinate(convertCoordinateFromMessage(tm.ByWho.Coordinate)) < volumeCoordinate(n.coordinates) {
+		go n.startTakeover(tm.FailureNode)
+		return &pb.Bool{B: false}, nil
+	}
+	if _, ok := n.neighbours[tm.FailureNode]; ok {
+		delete(n.neighbours, tm.FailureNode)
+		delete(n.neighboursNeighbours, tm.FailureNode)
+		delete(n.heartBeatTimer, tm.FailureNode)
+	}
+	return &pb.Bool{B: true}, nil
+}
+func (n *NodeServer) startTakeover(who string) {
+	log.Printf("Start takeover procedur")
+	for _, ne := range n.neighboursNeighbours[who] {
+		client, _ := createClient(ne)
+		b, _ := client.Takeover(context.Background(), &pb.TakeoverMessage{FailureNode: who, ByWho: &pb.NodeInformation{Coordinate: convertCoordinateToMessage(n.coordinates), OriginNode: &pb.IPAddress{Address: n.address}}})
+		if !b.B {
+			return
+		}
+	}
+
+}
 func (n *NodeServer) HeartBeat(ctx context.Context, infoNeighbour *pb.HeartBeatMessage) (*pb.HeartBeatMessage, error) { //  Quando ricevi heartbeat aggiorna vicini e le loro coordinate
 	log.Printf("HeartBeat")
 	addressNeighboursNeighbour := make([]string, 0, len(infoNeighbour.Nodes))
@@ -607,22 +691,20 @@ func (n *NodeServer) HeartBeat(ctx context.Context, infoNeighbour *pb.HeartBeatM
 	}
 	n.neighboursNeighbours[infoNeighbour.FromWho] = addressNeighboursNeighbour
 	n.backupNodesNeighbour[infoNeighbour.FromWho] = infoNeighbour.BackupNodes
+	n.StartOrResetHeartBeat(infoNeighbour.FromWho, time.Second*HEARTBEAT_INTERVAL*2)
 	n.removeOldNeighbours()
-	if len(n.neighbours) >= NREP && len(n.backupNodes) < 2 {
-		for k := range n.neighbours {
-			present := false
-			for _, x := range n.backupNodes {
-				if x == k {
-					present = true
+	if len(n.backupNodes) < NREP {
+		invalidNodes := n.backupNodes
+		invalidNodes = append(invalidNodes, n.address)
+		for i := len(n.backupNodes); i < NREP; i++ {
+			bootClient, _ := createBootstrapClient("bootstrap:50051") //todo prendere corretto indirizzo bootstrap
+			backup, err := bootClient.FindActiveNode(context.Background(), &pb.AddressList{Ad: invalidNodes})
+			if err != nil {
+				if backup != nil {
+					n.backupNodes = append(n.backupNodes, backup.Address)
+					invalidNodes = append(invalidNodes, backup.Address)
 				}
 			}
-			if !present {
-				n.backupNodes = append(n.backupNodes, k)
-				if len(n.backupNodes) == NREP {
-					break
-				}
-			}
-
 		}
 	}
 	log.Printf("i vicini a seguito heartbeat %v", n.neighbours)
@@ -675,15 +757,15 @@ func (n *NodeServer) periodicHeartBeat() {
 		time.Sleep(120 * time.Second)
 	}
 }
-func (n *NodeServer) HeartBeatBackup(ctx context.Context, info *pb.Bool) (*pb.Bool, error) {
-	//todo azzera timer
+func (n *NodeServer) HeartBeatBackup(ctx context.Context, address *pb.IPAddress) (*pb.Bool, error) {
+	n.StartOrResetBackup(address.Address, time.Second*HEARTBEAT_INTERVAL*2) //Azzeri timer
 	return nil, nil
 }
 func (n *NodeServer) periodicHeartBeatBackup() {
 	for {
-		for _, backupNode := range n.backupNodes {
+		for backupNode, _ := range n.nodesIBackup {
 			client, _ := createClient(backupNode)
-			client.HeartBeatBackup(context.Background(), &pb.Bool{})
+			client.HeartBeatBackup(context.Background(), &pb.IPAddress{Address: n.address})
 		}
 	}
 }
@@ -703,13 +785,13 @@ func (n *NodeServer) startGrpcServer() {
 	}
 
 }
+
 func abs(f float32) float32 {
 	if f < 0 {
 		return -f
 	}
 	return f
 }
-
 func randomString(n int) string {
 	const letters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 	b := make([]byte, n)
@@ -718,7 +800,6 @@ func randomString(n int) string {
 	}
 	return string(b)
 }
-
 func findStringForPoint(targetX, targetY, tolerance float32) string {
 	rand.Seed(time.Now().UnixNano())
 	attempts := 0
@@ -750,6 +831,8 @@ func main() {
 		nodesIBackup:         map[string]map[string]string{},
 		backupNodes:          []string{},
 		address:              myAddress,
+		heartBeatTimer:       map[string]*time.Timer{},
+		backupTimer:          map[string]*time.Timer{},
 	}
 	// Connessione al Bootstrap Server
 	conn, err := grpc.Dial(bootstrapAddress, grpc.WithInsecure())
@@ -815,10 +898,14 @@ func main() {
 	node.removeOldNeighbours()
 	log.Printf("my neighbours are %v", node.neighbours)
 	//Devo scegliere quali nodi avranno funzione di backup (random)
-	for k := range node.neighbours {
-		node.backupNodes = append(node.backupNodes, k)
-		if len(node.backupNodes) == int(math.Min(float64(NREP), float64(len(node.neighbours)))) {
-			break
+	invalidNodes := make([]string, 0, 1)
+	invalidNodes = append(invalidNodes, myAddress)
+	for i := 0; i < NREP; i++ {
+		bootClient, _ := createBootstrapClient(bootstrapAddress)
+		backup, err := bootClient.FindActiveNode(context.Background(), &pb.AddressList{Ad: invalidNodes})
+		if err != nil {
+			node.backupNodes = append(node.backupNodes, backup.Address)
+			invalidNodes = append(invalidNodes, backup.Address)
 		}
 	}
 	//Avvio procedura heartbeat

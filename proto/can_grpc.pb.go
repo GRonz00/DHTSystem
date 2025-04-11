@@ -213,6 +213,7 @@ const (
 	NodeService_DeleteResourcesBackup_FullMethodName      = "/proto.NodeService/deleteResourcesBackup"
 	NodeService_AddResourcesBackup_FullMethodName         = "/proto.NodeService/addResourcesBackup"
 	NodeService_DeleteAllResourcesBackup_FullMethodName   = "/proto.NodeService/deleteAllResourcesBackup"
+	NodeService_Takeover_FullMethodName                   = "/proto.NodeService/takeover"
 )
 
 // NodeServiceClient is the client API for NodeService service.
@@ -231,10 +232,11 @@ type NodeServiceClient interface {
 	RemoveNodeAsNeighbour(ctx context.Context, in *IPAddress, opts ...grpc.CallOption) (*Bool, error)
 	AddResourceToBackupNode(ctx context.Context, in *AddBackup, opts ...grpc.CallOption) (*Bool, error)
 	DeleteResourceToBackupNode(ctx context.Context, in *DeleteBackup, opts ...grpc.CallOption) (*Bool, error)
-	HeartBeatBackup(ctx context.Context, in *Bool, opts ...grpc.CallOption) (*Bool, error)
+	HeartBeatBackup(ctx context.Context, in *IPAddress, opts ...grpc.CallOption) (*Bool, error)
 	DeleteResourcesBackup(ctx context.Context, in *ResourcesBackup, opts ...grpc.CallOption) (*Bool, error)
 	AddResourcesBackup(ctx context.Context, in *ResourcesBackup, opts ...grpc.CallOption) (*Bool, error)
 	DeleteAllResourcesBackup(ctx context.Context, in *IPAddress, opts ...grpc.CallOption) (*Bool, error)
+	Takeover(ctx context.Context, in *TakeoverMessage, opts ...grpc.CallOption) (*Bool, error)
 }
 
 type nodeServiceClient struct {
@@ -365,7 +367,7 @@ func (c *nodeServiceClient) DeleteResourceToBackupNode(ctx context.Context, in *
 	return out, nil
 }
 
-func (c *nodeServiceClient) HeartBeatBackup(ctx context.Context, in *Bool, opts ...grpc.CallOption) (*Bool, error) {
+func (c *nodeServiceClient) HeartBeatBackup(ctx context.Context, in *IPAddress, opts ...grpc.CallOption) (*Bool, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(Bool)
 	err := c.cc.Invoke(ctx, NodeService_HeartBeatBackup_FullMethodName, in, out, cOpts...)
@@ -405,6 +407,16 @@ func (c *nodeServiceClient) DeleteAllResourcesBackup(ctx context.Context, in *IP
 	return out, nil
 }
 
+func (c *nodeServiceClient) Takeover(ctx context.Context, in *TakeoverMessage, opts ...grpc.CallOption) (*Bool, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Bool)
+	err := c.cc.Invoke(ctx, NodeService_Takeover_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // NodeServiceServer is the server API for NodeService service.
 // All implementations must embed UnimplementedNodeServiceServer
 // for forward compatibility.
@@ -421,10 +433,11 @@ type NodeServiceServer interface {
 	RemoveNodeAsNeighbour(context.Context, *IPAddress) (*Bool, error)
 	AddResourceToBackupNode(context.Context, *AddBackup) (*Bool, error)
 	DeleteResourceToBackupNode(context.Context, *DeleteBackup) (*Bool, error)
-	HeartBeatBackup(context.Context, *Bool) (*Bool, error)
+	HeartBeatBackup(context.Context, *IPAddress) (*Bool, error)
 	DeleteResourcesBackup(context.Context, *ResourcesBackup) (*Bool, error)
 	AddResourcesBackup(context.Context, *ResourcesBackup) (*Bool, error)
 	DeleteAllResourcesBackup(context.Context, *IPAddress) (*Bool, error)
+	Takeover(context.Context, *TakeoverMessage) (*Bool, error)
 	mustEmbedUnimplementedNodeServiceServer()
 }
 
@@ -471,7 +484,7 @@ func (UnimplementedNodeServiceServer) AddResourceToBackupNode(context.Context, *
 func (UnimplementedNodeServiceServer) DeleteResourceToBackupNode(context.Context, *DeleteBackup) (*Bool, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method DeleteResourceToBackupNode not implemented")
 }
-func (UnimplementedNodeServiceServer) HeartBeatBackup(context.Context, *Bool) (*Bool, error) {
+func (UnimplementedNodeServiceServer) HeartBeatBackup(context.Context, *IPAddress) (*Bool, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method HeartBeatBackup not implemented")
 }
 func (UnimplementedNodeServiceServer) DeleteResourcesBackup(context.Context, *ResourcesBackup) (*Bool, error) {
@@ -482,6 +495,9 @@ func (UnimplementedNodeServiceServer) AddResourcesBackup(context.Context, *Resou
 }
 func (UnimplementedNodeServiceServer) DeleteAllResourcesBackup(context.Context, *IPAddress) (*Bool, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method DeleteAllResourcesBackup not implemented")
+}
+func (UnimplementedNodeServiceServer) Takeover(context.Context, *TakeoverMessage) (*Bool, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Takeover not implemented")
 }
 func (UnimplementedNodeServiceServer) mustEmbedUnimplementedNodeServiceServer() {}
 func (UnimplementedNodeServiceServer) testEmbeddedByValue()                     {}
@@ -721,7 +737,7 @@ func _NodeService_DeleteResourceToBackupNode_Handler(srv interface{}, ctx contex
 }
 
 func _NodeService_HeartBeatBackup_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(Bool)
+	in := new(IPAddress)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
@@ -733,7 +749,7 @@ func _NodeService_HeartBeatBackup_Handler(srv interface{}, ctx context.Context, 
 		FullMethod: NodeService_HeartBeatBackup_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(NodeServiceServer).HeartBeatBackup(ctx, req.(*Bool))
+		return srv.(NodeServiceServer).HeartBeatBackup(ctx, req.(*IPAddress))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -788,6 +804,24 @@ func _NodeService_DeleteAllResourcesBackup_Handler(srv interface{}, ctx context.
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(NodeServiceServer).DeleteAllResourcesBackup(ctx, req.(*IPAddress))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _NodeService_Takeover_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(TakeoverMessage)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(NodeServiceServer).Takeover(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: NodeService_Takeover_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(NodeServiceServer).Takeover(ctx, req.(*TakeoverMessage))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -862,6 +896,10 @@ var NodeService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "deleteAllResourcesBackup",
 			Handler:    _NodeService_DeleteAllResourcesBackup_Handler,
+		},
+		{
+			MethodName: "takeover",
+			Handler:    _NodeService_Takeover_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
