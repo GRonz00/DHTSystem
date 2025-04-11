@@ -221,7 +221,21 @@ func (n *NodeServer) removeOldNeighbours() {
 		}
 	}
 }
-func (n *NodeServer) RemoveResourcesBackup
+func (n *NodeServer) DeleteResourcesBackup(ctx context.Context, resources *pb.ResourcesBackup) (*pb.Bool, error) {
+	for _, resource := range resources.Resources {
+		if _, ok := n.nodesIBackup[resources.Address][resource.Key]; ok {
+			delete(n.nodesIBackup, resource.Key)
+		}
+	}
+	return nil, nil
+}
+func (n *NodeServer) AddResourcesBackup(ctx context.Context, resources *pb.ResourcesBackup) (*pb.Bool, error) {
+	for _, resource := range resources.Resources {
+		n.nodesIBackup[resources.Address][resource.Key] = resource.Value
+	}
+	return nil, nil
+}
+
 func (n *NodeServer) SplitZone(ctx context.Context, newNode *pb.NewNodeInformation) (*pb.InformationToAddNode, error) {
 	log.Printf("Divido la zona con %s", newNode.Address)
 	point := Point{newNode.Point.X, newNode.Point.Y}
@@ -258,9 +272,15 @@ func (n *NodeServer) SplitZone(ctx context.Context, newNode *pb.NewNodeInformati
 	resourceOfNeighbour := make([]*pb.Resource, 0)
 	for key, value := range n.resources {
 		if !n.contain(stringToPoint(key)) {
+			//risorse di ci si deve occupare il nuovo nodo
 			resourceOfNeighbour = append(resourceOfNeighbour, &pb.Resource{Key: key, Value: value})
 			delete(n.resources, key)
 		}
+	}
+	//Devo tenere aggiornate le copie di backup
+	for _, backup := range n.backupNodes {
+		backupClient, _ := createClient(backup)
+		backupClient.AddResourcesBackup(context.Background(), &pb.ResourcesBackup{Address: n.address, Resources: resourceOfNeighbour})
 	}
 	//create message to new node
 	neighboursCopy := make([]*pb.NodeInformation, 0, len(n.neighbours)) // Slice con capacità pre-allocata, ma vuota
@@ -274,6 +294,8 @@ func (n *NodeServer) SplitZone(ctx context.Context, newNode *pb.NewNodeInformati
 	n.neighbours[newNode.Address.GetAddress()] = newCoordinate
 	n.removeOldNeighbours()
 	log.Printf("my new neighbours are %v", n.neighbours)
+
+	//Devo tenere aggiornate le copie di backup
 
 	originNode := &pb.NodeInformation{
 		Coordinate: convertCoordinateToMessage(n.coordinates),
@@ -338,6 +360,12 @@ func (n *NodeServer) UnionZone(ctx context.Context, info *pb.InformationToAddNod
 	for _, r := range info.Resources {
 		n.resources[r.Key] = r.Value
 	}
+	//Aggiorni i nodi di backup
+	for _, backup := range n.backupNodes {
+		backupClient, _ := createClient(backup)
+		backupClient.AddResourcesBackup(context.Background(), &pb.ResourcesBackup{Resources: info.Resources, Address: n.address})
+	}
+
 	cooOldNode := convertCoordinateFromMessage(info.NewCoordinate)
 
 	// Calcolo nuova zona come bounding box
@@ -374,6 +402,14 @@ func (n *NodeServer) RemoveNodeAsNeighbour(ctx context.Context, neighbour *pb.IP
 	}
 	return nil, nil
 }
+func (n *NodeServer) DeleteAllResourcesBackup(ctx context.Context, who *pb.IPAddress) (*pb.Bool, error) {
+	for k := range n.nodesIBackup[who.Address] {
+		if _, ok := n.nodesIBackup[who.Address][k]; ok {
+			delete(n.nodesIBackup[who.Address], k)
+		}
+	}
+	return nil, nil
+}
 func (n *NodeServer) searchBrother() string {
 	selfVolume := volumeCoordinate(n.coordinates)
 	for neighbour, coordinate := range n.neighbours {
@@ -397,6 +433,7 @@ func (n *NodeServer) searchBrother() string {
 func (n *NodeServer) changeZone(info *pb.Resources) {
 	n.coordinates = convertCoordinateFromMessage(info.CoordinateOldNode)
 	n.resources = map[string]string{}
+
 	n.neighboursNeighbours = map[string][]string{}
 	n.neighbours = map[string]Coordinates{}
 	for _, res := range info.Resources {
@@ -405,6 +442,13 @@ func (n *NodeServer) changeZone(info *pb.Resources) {
 	for _, nei := range info.NeighboursOldNode {
 		n.neighbours[nei.OriginNode.Address] = convertCoordinateFromMessage(nei.Coordinate)
 	}
+	//Aggiorna nodi backup
+	for _, backup := range n.backupNodes {
+		backupClient, _ := createClient(backup)
+		backupClient.DeleteAllResourcesBackup(context.Background(), &pb.IPAddress{Address: n.address})
+		backupClient.AddResourcesBackup(context.Background(), &pb.ResourcesBackup{Resources: info.Resources, Address: n.address})
+	}
+
 	n.sendHeartBeatAllNeighbours()
 }
 func (n *NodeServer) EntrustResources(ctx context.Context, info *pb.Resources) (*pb.Bool, error) {
@@ -564,11 +608,11 @@ func (n *NodeServer) HeartBeat(ctx context.Context, infoNeighbour *pb.HeartBeatM
 	n.neighboursNeighbours[infoNeighbour.FromWho] = addressNeighboursNeighbour
 	n.backupNodesNeighbour[infoNeighbour.FromWho] = infoNeighbour.BackupNodes
 	n.removeOldNeighbours()
-	if len(n.neighbours)>=NREP && len(n.backupNodes)<2{
+	if len(n.neighbours) >= NREP && len(n.backupNodes) < 2 {
 		for k := range n.neighbours {
 			present := false
-			for _,x := range n.backupNodes{
-				if x==k{
+			for _, x := range n.backupNodes {
+				if x == k {
 					present = true
 				}
 			}
@@ -631,15 +675,15 @@ func (n *NodeServer) periodicHeartBeat() {
 		time.Sleep(120 * time.Second)
 	}
 }
-func (n* NodeServer) HeartBeatBackup(ctx context.Context, info *pb.Bool) (*pb.Bool, error) {
+func (n *NodeServer) HeartBeatBackup(ctx context.Context, info *pb.Bool) (*pb.Bool, error) {
 	//todo azzera timer
-	return nil,nil
+	return nil, nil
 }
 func (n *NodeServer) periodicHeartBeatBackup() {
 	for {
 		for _, backupNode := range n.backupNodes {
-			client,_ := createClient(backupNode)
-			client.HeartBeatBackup(context.Background(),&pb.Bool{})
+			client, _ := createClient(backupNode)
+			client.HeartBeatBackup(context.Background(), &pb.Bool{})
 		}
 	}
 }

@@ -85,10 +85,13 @@ service NodeService{
   rpc splitZone(NewNodeInformation) returns (InformationToAddNode);
   rpc updateZone(Coordinate) returns (Bool);
   rpc removeNodeAsNeighbour(IPAddress) returns (Bool);
+
   rpc addResourceToBackupNode(AddBackup) returns (Bool);
   rpc deleteResourceToBackupNode(DeleteBackup) returns (Bool);
   rpc heartBeatBackup(Bool) returns (Bool);
   rpc deleteResourcesBackup(ResourcesBackup) returns (Bool);
+  rpc addResourcesBackup(ResourcesBackup) returns (Bool);
+  rpc deleteAllResourcesBackup(IPAddress) returns (Bool);
 
 
 

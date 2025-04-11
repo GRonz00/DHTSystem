@@ -210,6 +210,9 @@ const (
 	NodeService_AddResourceToBackupNode_FullMethodName    = "/proto.NodeService/addResourceToBackupNode"
 	NodeService_DeleteResourceToBackupNode_FullMethodName = "/proto.NodeService/deleteResourceToBackupNode"
 	NodeService_HeartBeatBackup_FullMethodName            = "/proto.NodeService/heartBeatBackup"
+	NodeService_DeleteResourcesBackup_FullMethodName      = "/proto.NodeService/deleteResourcesBackup"
+	NodeService_AddResourcesBackup_FullMethodName         = "/proto.NodeService/addResourcesBackup"
+	NodeService_DeleteAllResourcesBackup_FullMethodName   = "/proto.NodeService/deleteAllResourcesBackup"
 )
 
 // NodeServiceClient is the client API for NodeService service.
@@ -229,6 +232,9 @@ type NodeServiceClient interface {
 	AddResourceToBackupNode(ctx context.Context, in *AddBackup, opts ...grpc.CallOption) (*Bool, error)
 	DeleteResourceToBackupNode(ctx context.Context, in *DeleteBackup, opts ...grpc.CallOption) (*Bool, error)
 	HeartBeatBackup(ctx context.Context, in *Bool, opts ...grpc.CallOption) (*Bool, error)
+	DeleteResourcesBackup(ctx context.Context, in *ResourcesBackup, opts ...grpc.CallOption) (*Bool, error)
+	AddResourcesBackup(ctx context.Context, in *ResourcesBackup, opts ...grpc.CallOption) (*Bool, error)
+	DeleteAllResourcesBackup(ctx context.Context, in *IPAddress, opts ...grpc.CallOption) (*Bool, error)
 }
 
 type nodeServiceClient struct {
@@ -369,6 +375,36 @@ func (c *nodeServiceClient) HeartBeatBackup(ctx context.Context, in *Bool, opts 
 	return out, nil
 }
 
+func (c *nodeServiceClient) DeleteResourcesBackup(ctx context.Context, in *ResourcesBackup, opts ...grpc.CallOption) (*Bool, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Bool)
+	err := c.cc.Invoke(ctx, NodeService_DeleteResourcesBackup_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *nodeServiceClient) AddResourcesBackup(ctx context.Context, in *ResourcesBackup, opts ...grpc.CallOption) (*Bool, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Bool)
+	err := c.cc.Invoke(ctx, NodeService_AddResourcesBackup_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *nodeServiceClient) DeleteAllResourcesBackup(ctx context.Context, in *IPAddress, opts ...grpc.CallOption) (*Bool, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Bool)
+	err := c.cc.Invoke(ctx, NodeService_DeleteAllResourcesBackup_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // NodeServiceServer is the server API for NodeService service.
 // All implementations must embed UnimplementedNodeServiceServer
 // for forward compatibility.
@@ -386,6 +422,9 @@ type NodeServiceServer interface {
 	AddResourceToBackupNode(context.Context, *AddBackup) (*Bool, error)
 	DeleteResourceToBackupNode(context.Context, *DeleteBackup) (*Bool, error)
 	HeartBeatBackup(context.Context, *Bool) (*Bool, error)
+	DeleteResourcesBackup(context.Context, *ResourcesBackup) (*Bool, error)
+	AddResourcesBackup(context.Context, *ResourcesBackup) (*Bool, error)
+	DeleteAllResourcesBackup(context.Context, *IPAddress) (*Bool, error)
 	mustEmbedUnimplementedNodeServiceServer()
 }
 
@@ -434,6 +473,15 @@ func (UnimplementedNodeServiceServer) DeleteResourceToBackupNode(context.Context
 }
 func (UnimplementedNodeServiceServer) HeartBeatBackup(context.Context, *Bool) (*Bool, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method HeartBeatBackup not implemented")
+}
+func (UnimplementedNodeServiceServer) DeleteResourcesBackup(context.Context, *ResourcesBackup) (*Bool, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method DeleteResourcesBackup not implemented")
+}
+func (UnimplementedNodeServiceServer) AddResourcesBackup(context.Context, *ResourcesBackup) (*Bool, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method AddResourcesBackup not implemented")
+}
+func (UnimplementedNodeServiceServer) DeleteAllResourcesBackup(context.Context, *IPAddress) (*Bool, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method DeleteAllResourcesBackup not implemented")
 }
 func (UnimplementedNodeServiceServer) mustEmbedUnimplementedNodeServiceServer() {}
 func (UnimplementedNodeServiceServer) testEmbeddedByValue()                     {}
@@ -690,6 +738,60 @@ func _NodeService_HeartBeatBackup_Handler(srv interface{}, ctx context.Context, 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _NodeService_DeleteResourcesBackup_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ResourcesBackup)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(NodeServiceServer).DeleteResourcesBackup(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: NodeService_DeleteResourcesBackup_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(NodeServiceServer).DeleteResourcesBackup(ctx, req.(*ResourcesBackup))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _NodeService_AddResourcesBackup_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ResourcesBackup)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(NodeServiceServer).AddResourcesBackup(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: NodeService_AddResourcesBackup_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(NodeServiceServer).AddResourcesBackup(ctx, req.(*ResourcesBackup))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _NodeService_DeleteAllResourcesBackup_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(IPAddress)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(NodeServiceServer).DeleteAllResourcesBackup(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: NodeService_DeleteAllResourcesBackup_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(NodeServiceServer).DeleteAllResourcesBackup(ctx, req.(*IPAddress))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // NodeService_ServiceDesc is the grpc.ServiceDesc for NodeService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -748,6 +850,18 @@ var NodeService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "heartBeatBackup",
 			Handler:    _NodeService_HeartBeatBackup_Handler,
+		},
+		{
+			MethodName: "deleteResourcesBackup",
+			Handler:    _NodeService_DeleteResourcesBackup_Handler,
+		},
+		{
+			MethodName: "addResourcesBackup",
+			Handler:    _NodeService_AddResourcesBackup_Handler,
+		},
+		{
+			MethodName: "deleteAllResourcesBackup",
+			Handler:    _NodeService_DeleteAllResourcesBackup_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
