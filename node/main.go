@@ -138,6 +138,64 @@ func (n *NodeServer) DeleteResourceToBackupNode(ctx context.Context, resource *p
 	}
 	return nil, nil
 }
+func convertPointFromMessage(point *pb.Point) Point {
+	return Point{X: point.X, Y: point.Y}
+}
+func (n *NodeServer) SearchNode(ctx context.Context, info *pb.NodeResearch) (*pb.IPAddress, error) {
+	p := convertPointFromMessage(info.Point)
+	if n.contain(p) {
+		return &pb.IPAddress{Address: n.address}, nil
+	}
+	minDistance := math.MaxFloat64 // Inizializza con il massimo valore possibile
+	bestNode := ""
+	for k, v := range n.neighbours {
+		for _, en := range info.ExcludeNodes {
+			if en == k {
+				continue
+			}
+		}
+		nodePoint := Point{X: v.CenterX, Y: v.CenterY}
+		dist := calculateDistance(nodePoint, p)
+		if dist < minDistance {
+			minDistance = dist
+			bestNode = k
+		}
+	}
+	if bestNode == "" {
+		return nil, errors.New("non avevo vicini per cercare il nodo")
+	}
+	client, err := createClient(bestNode)
+	if err != nil {
+		return nil, err
+	}
+	info.ExcludeNodes = append(info.ExcludeNodes, n.address)
+	node, err := client.SearchNode(context.Background(), info)
+	if err != nil {
+		return nil, err
+	}
+	return &pb.IPAddress{Address: node.Address}, nil
+}
+func (n *NodeServer) flooding(invalidNode string, key string) pb.NodeServiceClient {
+	for nei := range n.neighbours {
+		if nei != invalidNode {
+			client, err := createClient(nei)
+			if err != nil {
+				continue
+			}
+			p := stringToPoint(key)
+			node, err := client.SearchNode(context.Background(), &pb.NodeResearch{Point: &pb.Point{X: p.X, Y: p.Y}, ExcludeNodes: []string{n.address, invalidNode}})
+			if err != nil {
+				continue
+			}
+			client, err = createClient(node.Address)
+			if err != nil {
+				continue
+			}
+			return client
+		}
+	}
+	return nil
+}
 func (n *NodeServer) AddResource(ctx context.Context, resource *pb.Resource) (*pb.IPAddress, error) {
 	n.muRes.Lock()
 	defer n.muRes.Unlock()
@@ -159,7 +217,12 @@ func (n *NodeServer) AddResource(ctx context.Context, resource *pb.Resource) (*p
 		conn, err := grpc.Dial(nodeToRouting, grpc.WithInsecure())
 		if err != nil {
 			log.Printf("Impossibile connettersi al nodo %s: %v", nodeToRouting, err)
-			return nil, err
+			client := n.flooding(nodeToRouting, resource.Key)
+			if client != nil {
+				return client.AddResource(context.Background(), resource)
+			}
+
+			return nil, errors.New("anche con flooding aggiunta risorsa andata male")
 		}
 		nodeClient := pb.NewNodeServiceClient(conn)
 		return nodeClient.AddResource(context.Background(), resource)
@@ -185,7 +248,12 @@ func (n *NodeServer) DeleteResource(ctx context.Context, resourceKey *pb.Key) (*
 		conn, err := grpc.Dial(nodeToRouting, grpc.WithInsecure())
 		if err != nil {
 			log.Printf("Impossibile connettersi al nodo %s: %v", nodeToRouting, err)
-			return nil, err
+			client := n.flooding(nodeToRouting, resourceKey.K)
+			if client != nil {
+				return client.DeleteResource(context.Background(), resourceKey)
+			}
+
+			return nil, errors.New("anche con flooding eliminazione risorsa andata male")
 		}
 		nodeClient := pb.NewNodeServiceClient(conn)
 		return nodeClient.DeleteResource(context.Background(), resourceKey)
@@ -207,7 +275,12 @@ func (n *NodeServer) GetResource(ctx context.Context, resourceKey *pb.Key) (*pb.
 		conn, err := grpc.Dial(nodeToRouting, grpc.WithInsecure())
 		if err != nil {
 			log.Printf("Impossibile connettersi al nodo %s: %v", nodeToRouting, err)
-			return nil, err
+			client := n.flooding(nodeToRouting, resourceKey.K)
+			if client != nil {
+				return client.GetResource(context.Background(), resourceKey)
+			}
+
+			return nil, errors.New("anche con flooding ricerca risorsa andata male")
 		}
 		nodeClient := pb.NewNodeServiceClient(conn)
 		return nodeClient.GetResource(context.Background(), resourceKey)
@@ -507,8 +580,8 @@ func (n *NodeServer) DeleteAllResourcesBackup(ctx context.Context, who *pb.IPAdd
 	return nil, nil
 }
 
-// Controlla se un intervallo [a, b] è valido (nato da divisioni binarie da [0,1])
-func IsBinaryDivision(a, b float64) bool {
+func IsBinaryDivision(a, b float64) bool { // Controlla se un intervallo [a, b] è valido (nato da divisioni binarie da [0,1])
+
 	const epsilon = 1e-9
 	if b <= a {
 		return false
@@ -611,7 +684,7 @@ func (n *NodeServer) EntrustResources(ctx context.Context, info *pb.Resources) (
 	//Fa una deepsearch fino a trovare due fratelli
 	//Se ho un fratello, unisco le due zone lui si occupa delle zone unite e io mi vado ad'occupare della zona del nodo che se neva
 	//Se non ho un fratello, affido al mio vicino più piccolo le risorse e se ne occupa lui
-	log.Printf("Entrust resources")
+	log.Printf("Entrust resources da %s", info.WhoSend)
 	brother := n.searchBrother()
 	if brother == "" {
 		log.Print("Non ho un fratello, affido le risorse al mio vicino più piccolo")
@@ -621,6 +694,7 @@ func (n *NodeServer) EntrustResources(ctx context.Context, info *pb.Resources) (
 			log.Printf("Vicino che controllo: %s, %v", nei, coo)
 			if info.WhoSend != nei && volumeCoordinate(coo) < minVol {
 				minN = nei
+				minVol = volumeCoordinate(coo)
 			}
 		}
 		client, err := createClient(minN)
@@ -825,6 +899,16 @@ func (n *NodeServer) startTakeover(who string) {
 		}
 	}
 	log.Printf("Mi occupo io del takeover di %s", who)
+	if len(n.backupNodesNeighbour[who]) == 0 {
+		log.Printf("Il vicino non aveva nodi per il backup")
+		res := &pb.Resources{}
+		res.CoordinateOldNode = convertCoordinateToMessage(n.neighbours[who])
+		res.AddressOldNode = &pb.IPAddress{Address: who}
+		res.NeighboursOldNode = neighboursCopy
+		res.WhoSend = n.address
+		n.EntrustResources(context.Background(), res)
+		return
+	}
 	for _, backup := range n.backupNodesNeighbour[who] {
 		backupClient, err := createClient(backup)
 		if err != nil {
@@ -873,18 +957,25 @@ func (n *NodeServer) HeartBeat(ctx context.Context, infoNeighbour *pb.HeartBeatM
 	n.StartOrResetHeartBeat(infoNeighbour.FromWho, time.Second*(HEARTBEAT_INTERVAL*2+20))
 	n.removeOldNeighbours()
 	if len(n.backupNodes) < NREP {
+		log.Printf("Non avevo abbastanza nodi di backup")
 		invalidNodes := n.backupNodes
 		invalidNodes = append(invalidNodes, n.address)
 		for i := len(n.backupNodes); i < NREP; i++ {
-			bootClient, _ := createBootstrapClient("bootstrap:50051") //todo prendere corretto indirizzo bootstrap
-			backup, err := bootClient.FindActiveNode(context.Background(), &pb.AddressList{Ad: invalidNodes})
+			bootClient, err := createBootstrapClient("bootstrap:50051")
 			if err != nil {
-				if backup != nil {
-					n.backupNodes = append(n.backupNodes, backup.Address)
-					invalidNodes = append(invalidNodes, backup.Address)
+				log.Printf("Impossibile connettersi al bootstrap")
+			} else {
+				backup, err := bootClient.FindActiveNode(context.Background(), &pb.AddressList{Ad: invalidNodes})
+				if err == nil {
+					if backup != nil {
+						n.backupNodes = append(n.backupNodes, backup.Address)
+						invalidNodes = append(invalidNodes, backup.Address)
+					}
 				}
 			}
+
 		}
+		log.Printf("I nodi di backup sono:%v", n.backupNodes)
 	}
 	log.Printf("i vicini a seguito heartbeat %v", n.neighbours)
 	log.Printf("i vicini di %s sono: %v", infoNeighbour.FromWho, n.neighboursNeighbours[infoNeighbour.FromWho])
@@ -955,7 +1046,7 @@ func (n *NodeServer) HeartBeatBackup(ctx context.Context, address *pb.IPAddress)
 func (n *NodeServer) periodicHeartBeatBackup() {
 
 	for {
-		for backupNode, _ := range n.nodesIBackup {
+		for backupNode := range n.nodesIBackup {
 			client, _ := createClient(backupNode)
 			client.HeartBeatBackup(context.Background(), &pb.IPAddress{Address: n.address})
 		}

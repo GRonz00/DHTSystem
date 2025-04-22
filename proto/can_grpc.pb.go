@@ -216,6 +216,7 @@ const (
 	NodeService_Takeover_FullMethodName                   = "/proto.NodeService/takeover"
 	NodeService_GetBackupResources_FullMethodName         = "/proto.NodeService/getBackupResources"
 	NodeService_HandShake_FullMethodName                  = "/proto.NodeService/handShake"
+	NodeService_SearchNode_FullMethodName                 = "/proto.NodeService/searchNode"
 )
 
 // NodeServiceClient is the client API for NodeService service.
@@ -241,6 +242,7 @@ type NodeServiceClient interface {
 	Takeover(ctx context.Context, in *TakeoverMessage, opts ...grpc.CallOption) (*Bool, error)
 	GetBackupResources(ctx context.Context, in *IPAddress, opts ...grpc.CallOption) (*Resources, error)
 	HandShake(ctx context.Context, in *IPAddress, opts ...grpc.CallOption) (*HeartBeatMessage, error)
+	SearchNode(ctx context.Context, in *NodeResearch, opts ...grpc.CallOption) (*IPAddress, error)
 }
 
 type nodeServiceClient struct {
@@ -441,6 +443,16 @@ func (c *nodeServiceClient) HandShake(ctx context.Context, in *IPAddress, opts .
 	return out, nil
 }
 
+func (c *nodeServiceClient) SearchNode(ctx context.Context, in *NodeResearch, opts ...grpc.CallOption) (*IPAddress, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(IPAddress)
+	err := c.cc.Invoke(ctx, NodeService_SearchNode_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // NodeServiceServer is the server API for NodeService service.
 // All implementations must embed UnimplementedNodeServiceServer
 // for forward compatibility.
@@ -464,6 +476,7 @@ type NodeServiceServer interface {
 	Takeover(context.Context, *TakeoverMessage) (*Bool, error)
 	GetBackupResources(context.Context, *IPAddress) (*Resources, error)
 	HandShake(context.Context, *IPAddress) (*HeartBeatMessage, error)
+	SearchNode(context.Context, *NodeResearch) (*IPAddress, error)
 	mustEmbedUnimplementedNodeServiceServer()
 }
 
@@ -530,6 +543,9 @@ func (UnimplementedNodeServiceServer) GetBackupResources(context.Context, *IPAdd
 }
 func (UnimplementedNodeServiceServer) HandShake(context.Context, *IPAddress) (*HeartBeatMessage, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method HandShake not implemented")
+}
+func (UnimplementedNodeServiceServer) SearchNode(context.Context, *NodeResearch) (*IPAddress, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method SearchNode not implemented")
 }
 func (UnimplementedNodeServiceServer) mustEmbedUnimplementedNodeServiceServer() {}
 func (UnimplementedNodeServiceServer) testEmbeddedByValue()                     {}
@@ -894,6 +910,24 @@ func _NodeService_HandShake_Handler(srv interface{}, ctx context.Context, dec fu
 	return interceptor(ctx, in, info, handler)
 }
 
+func _NodeService_SearchNode_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(NodeResearch)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(NodeServiceServer).SearchNode(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: NodeService_SearchNode_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(NodeServiceServer).SearchNode(ctx, req.(*NodeResearch))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // NodeService_ServiceDesc is the grpc.ServiceDesc for NodeService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -976,6 +1010,10 @@ var NodeService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "handShake",
 			Handler:    _NodeService_HandShake_Handler,
+		},
+		{
+			MethodName: "searchNode",
+			Handler:    _NodeService_SearchNode_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

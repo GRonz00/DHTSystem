@@ -75,6 +75,10 @@ message TakeoverMessage{
   string failureNode = 1;
   NodeInformation byWho = 2;
 }
+message NodeResearch{
+  Point point =1;
+  repeated string excludeNodes = 2;
+}
 service BootstrapService{
   rpc addNode(IPAddress) returns (IPAddress);
   rpc removeNode(IPAddress) returns (Bool);
@@ -103,4 +107,5 @@ service NodeService{
   rpc getBackupResources(IPAddress) returns (Resources);
 
   rpc handShake(IPAddress)returns (HeartBeatMessage);
+  rpc searchNode(NodeResearch) returns (IPAddress);
 }
