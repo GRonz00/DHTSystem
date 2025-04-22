@@ -30,6 +30,8 @@ message InformationToAddNode{
 
 }
 message Resources{
+  string whoSend = 5;
+  IPAddress addressOldNode = 4;
   repeated NodeInformation neighboursOldNode = 3;
   Coordinate coordinateOldNode = 1;
   repeated Resource resources = 2;
@@ -53,6 +55,7 @@ message Resource{
 }
 message Bool{
   bool b = 1;
+  Coordinate coordinate =2;
 }
 message Key{
   string k = 1;
@@ -98,4 +101,6 @@ service NodeService{
   rpc deleteAllResourcesBackup(IPAddress) returns (Bool);
   rpc takeover(TakeoverMessage) returns (Bool);
   rpc getBackupResources(IPAddress) returns (Resources);
+
+  rpc handShake(IPAddress)returns (HeartBeatMessage);
 }

@@ -214,6 +214,8 @@ const (
 	NodeService_AddResourcesBackup_FullMethodName         = "/proto.NodeService/addResourcesBackup"
 	NodeService_DeleteAllResourcesBackup_FullMethodName   = "/proto.NodeService/deleteAllResourcesBackup"
 	NodeService_Takeover_FullMethodName                   = "/proto.NodeService/takeover"
+	NodeService_GetBackupResources_FullMethodName         = "/proto.NodeService/getBackupResources"
+	NodeService_HandShake_FullMethodName                  = "/proto.NodeService/handShake"
 )
 
 // NodeServiceClient is the client API for NodeService service.
@@ -237,6 +239,8 @@ type NodeServiceClient interface {
 	AddResourcesBackup(ctx context.Context, in *ResourcesBackup, opts ...grpc.CallOption) (*Bool, error)
 	DeleteAllResourcesBackup(ctx context.Context, in *IPAddress, opts ...grpc.CallOption) (*Bool, error)
 	Takeover(ctx context.Context, in *TakeoverMessage, opts ...grpc.CallOption) (*Bool, error)
+	GetBackupResources(ctx context.Context, in *IPAddress, opts ...grpc.CallOption) (*Resources, error)
+	HandShake(ctx context.Context, in *IPAddress, opts ...grpc.CallOption) (*HeartBeatMessage, error)
 }
 
 type nodeServiceClient struct {
@@ -417,6 +421,26 @@ func (c *nodeServiceClient) Takeover(ctx context.Context, in *TakeoverMessage, o
 	return out, nil
 }
 
+func (c *nodeServiceClient) GetBackupResources(ctx context.Context, in *IPAddress, opts ...grpc.CallOption) (*Resources, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Resources)
+	err := c.cc.Invoke(ctx, NodeService_GetBackupResources_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *nodeServiceClient) HandShake(ctx context.Context, in *IPAddress, opts ...grpc.CallOption) (*HeartBeatMessage, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(HeartBeatMessage)
+	err := c.cc.Invoke(ctx, NodeService_HandShake_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // NodeServiceServer is the server API for NodeService service.
 // All implementations must embed UnimplementedNodeServiceServer
 // for forward compatibility.
@@ -438,6 +462,8 @@ type NodeServiceServer interface {
 	AddResourcesBackup(context.Context, *ResourcesBackup) (*Bool, error)
 	DeleteAllResourcesBackup(context.Context, *IPAddress) (*Bool, error)
 	Takeover(context.Context, *TakeoverMessage) (*Bool, error)
+	GetBackupResources(context.Context, *IPAddress) (*Resources, error)
+	HandShake(context.Context, *IPAddress) (*HeartBeatMessage, error)
 	mustEmbedUnimplementedNodeServiceServer()
 }
 
@@ -498,6 +524,12 @@ func (UnimplementedNodeServiceServer) DeleteAllResourcesBackup(context.Context, 
 }
 func (UnimplementedNodeServiceServer) Takeover(context.Context, *TakeoverMessage) (*Bool, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Takeover not implemented")
+}
+func (UnimplementedNodeServiceServer) GetBackupResources(context.Context, *IPAddress) (*Resources, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetBackupResources not implemented")
+}
+func (UnimplementedNodeServiceServer) HandShake(context.Context, *IPAddress) (*HeartBeatMessage, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method HandShake not implemented")
 }
 func (UnimplementedNodeServiceServer) mustEmbedUnimplementedNodeServiceServer() {}
 func (UnimplementedNodeServiceServer) testEmbeddedByValue()                     {}
@@ -826,6 +858,42 @@ func _NodeService_Takeover_Handler(srv interface{}, ctx context.Context, dec fun
 	return interceptor(ctx, in, info, handler)
 }
 
+func _NodeService_GetBackupResources_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(IPAddress)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(NodeServiceServer).GetBackupResources(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: NodeService_GetBackupResources_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(NodeServiceServer).GetBackupResources(ctx, req.(*IPAddress))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _NodeService_HandShake_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(IPAddress)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(NodeServiceServer).HandShake(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: NodeService_HandShake_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(NodeServiceServer).HandShake(ctx, req.(*IPAddress))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // NodeService_ServiceDesc is the grpc.ServiceDesc for NodeService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -900,6 +968,14 @@ var NodeService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "takeover",
 			Handler:    _NodeService_Takeover_Handler,
+		},
+		{
+			MethodName: "getBackupResources",
+			Handler:    _NodeService_GetBackupResources_Handler,
+		},
+		{
+			MethodName: "handShake",
+			Handler:    _NodeService_HandShake_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
