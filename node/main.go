@@ -149,10 +149,15 @@ func (n *NodeServer) SearchNode(ctx context.Context, info *pb.NodeResearch) (*pb
 	minDistance := math.MaxFloat64 // Inizializza con il massimo valore possibile
 	bestNode := ""
 	for k, v := range n.neighbours {
+		excluded := false
 		for _, en := range info.ExcludeNodes {
 			if en == k {
-				continue
+				excluded = true
+				break
 			}
+		}
+		if excluded {
+			continue
 		}
 		nodePoint := Point{X: v.CenterX, Y: v.CenterY}
 		dist := calculateDistance(nodePoint, p)
@@ -183,12 +188,15 @@ func (n *NodeServer) flooding(invalidNode string, key string) pb.NodeServiceClie
 				continue
 			}
 			p := stringToPoint(key)
+			log.Printf("flooding verso %s", nei)
 			node, err := client.SearchNode(context.Background(), &pb.NodeResearch{Point: &pb.Point{X: p.X, Y: p.Y}, ExcludeNodes: []string{n.address, invalidNode}})
 			if err != nil {
+				log.Printf("Error searching node: %v", err)
 				continue
 			}
 			client, err = createClient(node.Address)
 			if err != nil {
+				log.Printf("Error creating client with %s: %v", node.Address, err)
 				continue
 			}
 			return client
@@ -214,7 +222,7 @@ func (n *NodeServer) AddResource(ctx context.Context, resource *pb.Resource) (*p
 			log.Println("Errore: Nessun vicino disponibile per il routing")
 			return &pb.IPAddress{Address: n.address}, err
 		}
-		conn, err := grpc.Dial(nodeToRouting, grpc.WithInsecure())
+		conn, err := grpc.Dial(nodeToRouting, grpc.WithInsecure(), grpc.WithBlock(), grpc.WithTimeout(3*time.Second))
 		if err != nil {
 			log.Printf("Impossibile connettersi al nodo %s: %v", nodeToRouting, err)
 			client := n.flooding(nodeToRouting, resource.Key)
@@ -245,7 +253,7 @@ func (n *NodeServer) DeleteResource(ctx context.Context, resourceKey *pb.Key) (*
 			log.Println("Errore: Nessun vicino disponibile per il routing")
 			return &pb.IPAddress{Address: n.address}, err
 		}
-		conn, err := grpc.Dial(nodeToRouting, grpc.WithInsecure())
+		conn, err := grpc.Dial(nodeToRouting, grpc.WithInsecure(), grpc.WithBlock(), grpc.WithTimeout(3*time.Second))
 		if err != nil {
 			log.Printf("Impossibile connettersi al nodo %s: %v", nodeToRouting, err)
 			client := n.flooding(nodeToRouting, resourceKey.K)
@@ -272,7 +280,7 @@ func (n *NodeServer) GetResource(ctx context.Context, resourceKey *pb.Key) (*pb.
 			log.Println("Errore: Nessun vicino disponibile per il routing")
 			return nil, err
 		}
-		conn, err := grpc.Dial(nodeToRouting, grpc.WithInsecure())
+		conn, err := grpc.Dial(nodeToRouting, grpc.WithInsecure(), grpc.WithBlock(), grpc.WithTimeout(3*time.Second))
 		if err != nil {
 			log.Printf("Impossibile connettersi al nodo %s: %v", nodeToRouting, err)
 			client := n.flooding(nodeToRouting, resourceKey.K)
@@ -899,6 +907,8 @@ func (n *NodeServer) startTakeover(who string) {
 		}
 	}
 	log.Printf("Mi occupo io del takeover di %s", who)
+	bootClient, _ := createBootstrapClient("bootstrap:50051")
+	bootClient.RemoveNode(context.Background(), &pb.IPAddress{Address: who})
 	if len(n.backupNodesNeighbour[who]) == 0 {
 		log.Printf("Il vicino non aveva nodi per il backup")
 		res := &pb.Resources{}
@@ -1223,11 +1233,14 @@ func main() {
 	//Per problemi di concorrenza, due nodi vengono aggiunti contemporaneamente da due vicini, potrebbero essere vicini ma non saperlo
 	for neighbour, _ := range node.neighbours {
 		neighbourClient, _ := createClient(neighbour)
-		nn, _ := neighbourClient.HandShake(context.Background(), &pb.IPAddress{Address: myAddress})
-		for _, x := range nn.Nodes {
-			node.neighbours[x.OriginNode.Address] = convertCoordinateFromMessage(x.Coordinate)
+		nn, err := neighbourClient.HandShake(context.Background(), &pb.IPAddress{Address: myAddress})
+		if err != nil {
+			for _, x := range nn.Nodes {
+				node.neighbours[x.OriginNode.Address] = convertCoordinateFromMessage(x.Coordinate)
+			}
+			node.removeOldNeighbours()
 		}
-		node.removeOldNeighbours()
+
 	}
 	log.Printf("my neighbours after handshake are %v", node.neighbours)
 	reader := bufio.NewReader(os.Stdin)
