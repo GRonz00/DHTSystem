@@ -8,6 +8,7 @@ import (
 	"log"
 	"math/rand"
 	"net"
+	"os"
 	"sync"
 )
 
@@ -74,7 +75,8 @@ func (b *BootstrapServer) RemoveNode(ctx context.Context, address *pb.IPAddress)
 	return &pb.Bool{B: false}, nil
 }
 func main() {
-	listener, err := net.Listen("tcp", ":50051")
+	port := os.Getenv("PORT")
+	listener, err := net.Listen("tcp", ":"+port)
 	if err != nil {
 		log.Fatalf("Errore nel creare il listener: %v", err)
 	}
@@ -84,7 +86,7 @@ func main() {
 		nodes: make([]string, 0),
 	}
 	pb.RegisterBootstrapServiceServer(grpcServer, bootstrap)
-	log.Println("Bootstrap server in ascolto su :50051")
+	log.Println("Bootstrap server in ascolto su :" + port)
 
 	if err := grpcServer.Serve(listener); err != nil {
 		log.Fatalf("Errore nel servire il bootstrap: %v", err)

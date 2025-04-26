@@ -1,10 +1,12 @@
 module DHTSystem
 
-go 1.23.4
+go 1.23.0
+
+toolchain go1.23.4
 
 require (
-		google.golang.org/grpc v1.71.0
-		google.golang.org/protobuf v1.36.6 // indirect
+	google.golang.org/grpc v1.71.0
+	google.golang.org/protobuf v1.36.6 // indirect
 )
 
 require (

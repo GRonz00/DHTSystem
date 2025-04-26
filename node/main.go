@@ -20,9 +20,6 @@ import (
 	"time"
 )
 
-const NREP = 2
-const HEARTBEAT_INTERVAL = 60
-
 type Coordinates struct {
 	MinX    float32
 	MaxX    float32
@@ -82,7 +79,7 @@ func (n *NodeServer) StartOrResetBackup(id string, duration time.Duration) {
 }
 func (n *NodeServer) changeBackup(id string) {
 
-	bootClient, _ := createBootstrapClient("bootstrap:50051")
+	bootClient, _ := createBootstrapClient(os.Getenv("BOOTSTRAP_ADDRESS"))
 	backup, err := bootClient.FindActiveNode(context.Background(), &pb.AddressList{Ad: append(n.backupNodes, n.address)})
 	if err != nil {
 		log.Printf("Non è stato trovato un nodo disponibile per sostituire backup")
@@ -450,7 +447,7 @@ func (n *NodeServer) SplitZone(ctx context.Context, newNode *pb.NewNodeInformati
 	}
 
 	n.neighbours[newNode.Address.GetAddress()] = newCoordinate
-	n.StartOrResetHeartBeat(newNode.Address.GetAddress(), time.Second*(HEARTBEAT_INTERVAL*2+20))
+	n.StartOrResetHeartBeat(newNode.Address.GetAddress(), time.Second*(time.Duration(getHeartbeat()*2+20)))
 	n.removeOldNeighbours()
 	log.Printf("my new neighbours are %v", n.neighbours)
 
@@ -816,7 +813,7 @@ func (n *NodeServer) removeNode() {
 				if err != nil {
 					log.Printf("Errore nell'unire le zone, %v", err)
 				} else {
-					bootstrapAddress := "bootstrap:50051"
+					bootstrapAddress := os.Getenv("BOOTSTRAP_ADDRESS")
 
 					conn, err := grpc.Dial(bootstrapAddress, grpc.WithInsecure())
 					if err != nil {
@@ -907,7 +904,7 @@ func (n *NodeServer) startTakeover(who string) {
 		}
 	}
 	log.Printf("Mi occupo io del takeover di %s", who)
-	bootClient, _ := createBootstrapClient("bootstrap:50051")
+	bootClient, _ := createBootstrapClient(os.Getenv("BOOTSTRAP_ADDRESS"))
 	bootClient.RemoveNode(context.Background(), &pb.IPAddress{Address: who})
 	if len(n.backupNodesNeighbour[who]) == 0 {
 		log.Printf("Il vicino non aveva nodi per il backup")
@@ -964,14 +961,14 @@ func (n *NodeServer) HeartBeat(ctx context.Context, infoNeighbour *pb.HeartBeatM
 
 	n.neighboursNeighbours[infoNeighbour.FromWho] = addressNeighboursNeighbour
 	n.backupNodesNeighbour[infoNeighbour.FromWho] = infoNeighbour.BackupNodes
-	n.StartOrResetHeartBeat(infoNeighbour.FromWho, time.Second*(HEARTBEAT_INTERVAL*2+20))
+	n.StartOrResetHeartBeat(infoNeighbour.FromWho, time.Second*(time.Duration(getHeartbeat()*2+20)))
 	n.removeOldNeighbours()
-	if len(n.backupNodes) < NREP {
+	if len(n.backupNodes) < getNrep() {
 		log.Printf("Non avevo abbastanza nodi di backup")
 		invalidNodes := n.backupNodes
 		invalidNodes = append(invalidNodes, n.address)
-		for i := len(n.backupNodes); i < NREP; i++ {
-			bootClient, err := createBootstrapClient("bootstrap:50051")
+		for i := len(n.backupNodes); i < getNrep(); i++ {
+			bootClient, err := createBootstrapClient(os.Getenv("BOOTSTRAP_ADDRESS"))
 			if err != nil {
 				log.Printf("Impossibile connettersi al bootstrap")
 			} else {
@@ -1046,11 +1043,11 @@ func (n *NodeServer) sendHeartBeatAllNeighbours() {
 func (n *NodeServer) periodicHeartBeat() {
 	for {
 		n.sendHeartBeatAllNeighbours()
-		time.Sleep(HEARTBEAT_INTERVAL * time.Second)
+		time.Sleep(time.Duration(getHeartbeat()) * time.Second)
 	}
 }
 func (n *NodeServer) HeartBeatBackup(ctx context.Context, address *pb.IPAddress) (*pb.Bool, error) {
-	n.StartOrResetBackup(address.Address, time.Second*HEARTBEAT_INTERVAL*2) //Azzeri timer
+	n.StartOrResetBackup(address.Address, time.Second*time.Duration(getHeartbeat())*2) //Azzeri timer
 	return nil, nil
 }
 func (n *NodeServer) periodicHeartBeatBackup() {
@@ -1060,7 +1057,7 @@ func (n *NodeServer) periodicHeartBeatBackup() {
 			client, _ := createClient(backupNode)
 			client.HeartBeatBackup(context.Background(), &pb.IPAddress{Address: n.address})
 		}
-		time.Sleep(HEARTBEAT_INTERVAL * time.Second)
+		time.Sleep(time.Duration(getHeartbeat()) * time.Second)
 
 	}
 }
@@ -1120,10 +1117,30 @@ func (n *NodeServer) HandShake(ctx context.Context, newNode *pb.IPAddress) (*pb.
 	}
 	return &pb.HeartBeatMessage{Nodes: neigs}, nil
 }
+
+func getNrep() int {
+	nrepStr := os.Getenv("NREP")
+	nrep, err := strconv.Atoi(nrepStr)
+	if err != nil {
+		return 2
+	}
+	return nrep
+}
+
+func getHeartbeat() int {
+	hbStr := os.Getenv("HEARTBEAT_INTERVAL")
+	heartbeat, err := strconv.Atoi(hbStr)
+	if err != nil {
+		return 60
+	}
+	return heartbeat
+}
+
 func main() {
 	var coordinate Coordinates
-	bootstrapAddress := "bootstrap:50051"
+	bootstrapAddress := os.Getenv("BOOTSTRAP_ADDRESS")
 	myAddress := os.Getenv("MY_NODE_ADDRESS")
+
 	// Creazione del nodo
 	node := &NodeServer{
 		coordinates:          coordinate,
@@ -1131,7 +1148,7 @@ func main() {
 		neighboursNeighbours: map[string][]string{},
 		resources:            map[string]string{},
 		nodesIBackup:         map[string]map[string]string{},
-		backupNodes:          make([]string, 0, NREP),
+		backupNodes:          make([]string, 0, getNrep()),
 		backupNodesNeighbour: map[string][]string{},
 		address:              myAddress,
 		heartBeatTimer:       map[string]*time.Timer{},
@@ -1203,7 +1220,7 @@ func main() {
 				//Devo scegliere quali nodi avranno funzione di backup (random)
 				invalidNodes := make([]string, 0, 1)
 				invalidNodes = append(invalidNodes, myAddress)
-				for i := 0; i < NREP; i++ {
+				for i := 0; i < getNrep(); i++ {
 					bootClient, _ := createBootstrapClient(bootstrapAddress)
 					backup, err := bootClient.FindActiveNode(context.Background(), &pb.AddressList{Ad: invalidNodes})
 					if err != nil {
