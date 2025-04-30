@@ -13,6 +13,7 @@ import (
 	"math"
 	"math/rand"
 	"net"
+	"net/http"
 	"os"
 	"strconv"
 	"strings"
@@ -1062,8 +1063,14 @@ func (n *NodeServer) periodicHeartBeatBackup() {
 	}
 }
 func (n *NodeServer) startGrpcServer() {
+	var ind string
 	// Avvio del server gRPC
-	listener, err := net.Listen("tcp", n.address)
+	if os.Getenv("DOCKER") == "true" {
+		ind = n.address
+	} else {
+		ind = "0.0.0.0:" + os.Getenv("PORT")
+	}
+	listener, err := net.Listen("tcp", ind)
 	if err != nil {
 		log.Fatalf("Errore nel creare il listener: %v", err)
 	}
@@ -1135,11 +1142,100 @@ func getHeartbeat() int {
 	}
 	return heartbeat
 }
+func (node *NodeServer) AddResourceHandler(w http.ResponseWriter, r *http.Request) {
+	// Ottieni i parametri dalla richiesta HTTP
+	key := r.URL.Query().Get("key")
+	value := r.URL.Query().Get("value")
 
+	if key == "" || value == "" {
+		http.Error(w, "Missing key or value", http.StatusBadRequest)
+		return
+	}
+
+	// Chiamata alla funzione AddResource per aggiungere una risorsa
+	toWho, err := node.AddResource(context.Background(), &pb.Resource{Key: key, Value: value})
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Errore nell'aggiunta della risorsa: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Rispondi con un messaggio di successo
+	w.Write([]byte(fmt.Sprintf("Risorsa aggiunta al nodo %s", toWho.GetAddress())))
+}
+
+func (node *NodeServer) GetResourceHandler(w http.ResponseWriter, r *http.Request) {
+	key := r.URL.Query().Get("key")
+	if key == "" {
+		http.Error(w, "Missing key", http.StatusBadRequest)
+		return
+	}
+
+	// Chiamata alla funzione GetResource per ottenere la risorsa
+	risp, err := node.GetResource(context.Background(), &pb.Key{K: key})
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Errore nel recupero della risorsa, %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Rispondi con il valore della risorsa
+	w.Write([]byte(fmt.Sprintf("%s", risp.Value)))
+}
+
+func (node *NodeServer) DeleteResourceHandler(w http.ResponseWriter, r *http.Request) {
+	key := r.URL.Query().Get("key")
+	if key == "" {
+		http.Error(w, "Missing key", http.StatusBadRequest)
+		return
+	}
+
+	// Chiamata alla funzione DeleteResource per eliminare la risorsa
+	_, err := node.DeleteResource(context.Background(), &pb.Key{K: key})
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Errore nell'eliminazione della risorsa, %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Rispondi con un messaggio di successo
+	w.Write([]byte(fmt.Sprintf("Risorsa %s eliminata con successo", key)))
+}
+
+func (node *NodeServer) PrintAllResourcesHandler(w http.ResponseWriter, r *http.Request) {
+	// Stampa tutte le risorse
+	for n, value := range node.resources {
+		fmt.Fprintf(w, "%s: %s\n", n, value)
+	}
+}
+
+func (node *NodeServer) RemoveNodeHandler(w http.ResponseWriter, r *http.Request) {
+	// Elimina il nodo
+	node.removeNode()
+	w.Write([]byte("Nodo rimosso con successo"))
+}
+
+func (node *NodeServer) StartHTTPServer() {
+	// Impostiamo il router HTTP
+	mux := http.NewServeMux()
+	// Definiamo le rotte per ogni azione
+	// Aggiungi i vari handler alle rotte
+	mux.HandleFunc("/addResource", node.AddResourceHandler)
+	mux.HandleFunc("/getResource", node.GetResourceHandler)
+	mux.HandleFunc("/deleteResource", node.DeleteResourceHandler)
+	mux.HandleFunc("/printResources", node.PrintAllResourcesHandler)
+	mux.HandleFunc("/removeNode", node.RemoveNodeHandler)
+	port := os.Getenv("HTTP_PORT")
+
+	// Avvia il server HTTP
+	log.Printf("Starting HTTP server on port %s", port)
+	log.Fatal(http.ListenAndServe(":"+port, mux))
+}
 func main() {
 	var coordinate Coordinates
 	bootstrapAddress := os.Getenv("BOOTSTRAP_ADDRESS")
 	myAddress := os.Getenv("MY_NODE_ADDRESS")
+	doc := os.Getenv("DOCKER")
+	if doc != "true" {
+		myAddress = myAddress + ":" + os.Getenv("PORT")
+	}
 
 	// Creazione del nodo
 	node := &NodeServer{
@@ -1236,7 +1332,7 @@ func main() {
 	}
 	_, err = client.AddNode(context.Background(), &pb.IPAddress{Address: myAddress})
 	if err != nil {
-		log.Fatalf("Errore nell'aggiungersi alla rete")
+		log.Fatalf("Errore nell'aggiungersi alla rete %v", err)
 	}
 	log.Printf("Le mie coordinate sono x_min: %f, x_max: %f, y_min: %f, y_max: %f", node.coordinates.MinX, node.coordinates.MaxX, node.coordinates.MinY, node.coordinates.MaxY)
 	node.removeOldNeighbours()
@@ -1260,93 +1356,99 @@ func main() {
 
 	}
 	log.Printf("my neighbours after handshake are %v", node.neighbours)
-	reader := bufio.NewReader(os.Stdin)
-	for {
-		fmt.Println("1) Input resource \n2) Get resource \n3) Delete resource \n4) Print all resources\n5)Remove Node")
-		fmt.Print("Enter choice: ")
-		choice, errScan := reader.ReadString('\n')
-		if errScan != nil {
-			log.Printf("Errore input: %v", errScan)
-			continue
-		}
-		choice = strings.TrimSpace(choice)
-
-		switch choice {
-		case "1":
-			fmt.Print("Enter name: ")
-			key, _ := reader.ReadString('\n')
-			key = strings.TrimSpace(key)
-
-			fmt.Print("Enter content: ")
-			value, _ := reader.ReadString('\n')
-			value = strings.TrimSpace(value)
-
-			toWho, err := node.AddResource(context.Background(), &pb.Resource{Key: key, Value: value})
-			if err != nil {
-				fmt.Printf("Errore nell'aggiunta della risorsa: %v", err)
-
-			} else {
-				fmt.Printf("risorsa aggiunta al nodo %s\n", toWho.GetAddress())
+	if doc == "true" {
+		reader := bufio.NewReader(os.Stdin)
+		for {
+			fmt.Println("1) Input resource \n2) Get resource \n3) Delete resource \n4) Print all resources\n5)Remove Node")
+			fmt.Print("Enter choice: ")
+			choice, errScan := reader.ReadString('\n')
+			if errScan != nil {
+				log.Printf("Errore input: %v", errScan)
+				continue
 			}
+			choice = strings.TrimSpace(choice)
 
-		case "2":
-			fmt.Print("Enter name: ")
-			key, _ := reader.ReadString('\n')
-			key = strings.TrimSpace(key)
+			switch choice {
+			case "1":
+				fmt.Print("Enter name: ")
+				key, _ := reader.ReadString('\n')
+				key = strings.TrimSpace(key)
 
-			r, err := node.GetResource(context.Background(), &pb.Key{K: key})
-			if err != nil {
-				fmt.Printf("Errore nel recupero della risorsa, %v\n", err)
-			} else {
-				fmt.Printf("%s\n", r.Value)
-			}
+				fmt.Print("Enter content: ")
+				value, _ := reader.ReadString('\n')
+				value = strings.TrimSpace(value)
 
-		case "3":
-			fmt.Print("Enter name: ")
-			key, _ := reader.ReadString('\n')
-			key = strings.TrimSpace(key)
+				toWho, err := node.AddResource(context.Background(), &pb.Resource{Key: key, Value: value})
+				if err != nil {
+					fmt.Printf("Errore nell'aggiunta della risorsa: %v", err)
 
-			_, err := node.DeleteResource(context.Background(), &pb.Key{K: key})
-			if err != nil {
-				fmt.Printf("Errore nel eliminazione della risorsa, %v\n", err)
-			}
+				} else {
+					fmt.Printf("risorsa aggiunta al nodo %s\n", toWho.GetAddress())
+				}
 
-		case "4":
-			for n, value := range node.resources {
-				fmt.Printf("%s: %s\n", n, value)
-			}
-		case "5":
-			node.removeNode()
-		case "6":
-			fmt.Print("Enter x: ")
-			point, _ := reader.ReadString('\n')
-			point = strings.TrimSpace(point)
-			x, errF := strconv.ParseFloat(point, 32)
-			if errF != nil {
-				log.Printf("Errore conversione a float")
-			} else {
-				fmt.Print("Enter y: ")
-				point, _ = reader.ReadString('\n')
+			case "2":
+				fmt.Print("Enter name: ")
+				key, _ := reader.ReadString('\n')
+				key = strings.TrimSpace(key)
+
+				r, err := node.GetResource(context.Background(), &pb.Key{K: key})
+				if err != nil {
+					fmt.Printf("Errore nel recupero della risorsa, %v\n", err)
+				} else {
+					fmt.Printf("%s\n", r.Value)
+				}
+
+			case "3":
+				fmt.Print("Enter name: ")
+				key, _ := reader.ReadString('\n')
+				key = strings.TrimSpace(key)
+
+				_, err := node.DeleteResource(context.Background(), &pb.Key{K: key})
+				if err != nil {
+					fmt.Printf("Errore nel eliminazione della risorsa, %v\n", err)
+				}
+
+			case "4":
+				for n, value := range node.resources {
+					fmt.Printf("%s: %s\n", n, value)
+				}
+			case "5":
+				node.removeNode()
+			case "6":
+				fmt.Print("Enter x: ")
+				point, _ := reader.ReadString('\n')
 				point = strings.TrimSpace(point)
-				y, errF := strconv.ParseFloat(point, 32)
+				x, errF := strconv.ParseFloat(point, 32)
 				if errF != nil {
 					log.Printf("Errore conversione a float")
 				} else {
-					k := findStringForPoint(float32(x), float32(y), 0.1)
-					toWho, err := node.AddResource(context.Background(), &pb.Resource{Key: k, Value: k})
-					if err != nil {
-						fmt.Printf("Errore nell'aggiunta della risorsa: %v", err)
-
+					fmt.Print("Enter y: ")
+					point, _ = reader.ReadString('\n')
+					point = strings.TrimSpace(point)
+					y, errF := strconv.ParseFloat(point, 32)
+					if errF != nil {
+						log.Printf("Errore conversione a float")
 					} else {
-						fmt.Printf("risorsa aggiunta al nodo %s\n", toWho.GetAddress())
+						k := findStringForPoint(float32(x), float32(y), 0.1)
+						toWho, err := node.AddResource(context.Background(), &pb.Resource{Key: k, Value: k})
+						if err != nil {
+							fmt.Printf("Errore nell'aggiunta della risorsa: %v", err)
+
+						} else {
+							fmt.Printf("risorsa aggiunta al nodo %s\n", toWho.GetAddress())
+						}
 					}
+
 				}
 
+			default:
+				fmt.Println("Errore, scelta non valida.")
 			}
-
-		default:
-			fmt.Println("Errore, scelta non valida.")
 		}
+
+	} else {
+		go node.StartHTTPServer()
+		select {}
 	}
 
 }

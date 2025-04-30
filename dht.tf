@@ -65,7 +65,7 @@ resource "aws_route_table_association" "crta-subnet" {
 # Create Security Group
 resource "aws_security_group" "dht-security-group" {
   vpc_id      = aws_vpc.dht-vpc.id
-  description = "DP Security Group"
+  description = "DHT Security Group"
 
   egress {
     from_port   = 0
@@ -85,11 +85,18 @@ resource "aws_security_group" "dht-security-group" {
 
   # 8888 used by nodes
   ingress {
-    cidr_blocks = [var.vpc_cidr]
+    cidr_blocks = ["0.0.0.0/0"]
     from_port   = 8888
     to_port     = 8888
     protocol    = "tcp"
   }
+  # server http
+  ingress {
+      cidr_blocks = ["0.0.0.0/0"]
+      from_port   = 8080
+      to_port     = 8080
+      protocol    = "tcp"
+    }
 
 
   tags = {

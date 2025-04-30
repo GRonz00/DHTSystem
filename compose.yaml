@@ -5,6 +5,7 @@ services:
       dockerfile: Dockerfile.bootstrap
     environment:
       - CONFIG_FILE=/app/config/config.json
+      - PORT=8888
     volumes:
       - ./config:/app/config
   node_1:
@@ -17,6 +18,8 @@ services:
       - bootstrap
     environment:
       - MY_NODE_ADDRESS=node_1:8888
+      - DOCKER=true
+      - BOOTSTRAP_ADDRESS=bootstrap:8888
   node_2:
     build:
       context: .
@@ -27,6 +30,8 @@ services:
       - bootstrap
     environment:
       - MY_NODE_ADDRESS=node_2:8888
+      - DOCKER=true
+      - BOOTSTRAP_ADDRESS=bootstrap:8888
   node_3:
     build:
       context: .
@@ -37,6 +42,8 @@ services:
       - bootstrap
     environment:
       - MY_NODE_ADDRESS=node_3:8888
+      - DOCKER=true
+      - BOOTSTRAP_ADDRESS=bootstrap:8888
   node_4:
     build:
       context: .
@@ -47,6 +54,8 @@ services:
       - bootstrap
     environment:
       - MY_NODE_ADDRESS=node_4:8888
+      - DOCKER=true
+      - BOOTSTRAP_ADDRESS=bootstrap:8888
   node_5:
     build:
       context: .
@@ -57,6 +66,8 @@ services:
       - bootstrap
     environment:
       - MY_NODE_ADDRESS=node_5:8888
+      - DOCKER=true
+      - BOOTSTRAP_ADDRESS=bootstrap:8888
   node_6:
     build:
       context: .
@@ -67,3 +78,5 @@ services:
       - bootstrap
     environment:
       - MY_NODE_ADDRESS=node_6:8888
+      - DOCKER=true
+      - BOOTSTRAP_ADDRESS=bootstrap:8888

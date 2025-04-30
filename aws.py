@@ -34,8 +34,10 @@ Description=dht application
 Environment=BOOTSTRAP_ADDRESS={bootstrap_address}
 Environment=MY_NODE_ADDRESS={host}
 Environment=PORT={config['port']}
+Environment=HTTP_PORT={config['http_port']}
 Environment=HEARTBEAT_INTERVAL={config['heartbeat_interval']}
 Environment=NREP={config['nrep']}
+Environment=DOCKER={'false'}
 Type=simple
 WorkingDirectory=/home/ec2-user/dht
 ExecStart=/home/ec2-user/dht/build/node
@@ -85,7 +87,7 @@ public_workers_hosts = data["dht-workers-hosts-public"]["value"]
 threads: list[threading.Thread] = []
 
 print("Deploying Bootstrap")
-service(public_bootstrap, config)
+service(public_bootstrap, config,f"")
 run_command(f"./node.sh {key_pem} {public_bootstrap} bootstrap")
 
 for i in range(len(public_workers_hosts)):

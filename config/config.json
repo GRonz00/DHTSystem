@@ -4,5 +4,6 @@
   "port": 8888,
   "key_pair": "vockey",
   "instance": "t2.micro",
-  "workers": 1
+  "workers": 2,
+  "http_port": 8080
 }
