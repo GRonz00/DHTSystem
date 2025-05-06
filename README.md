@@ -9,6 +9,6 @@ Deployment Docker Compose:
   5)Remove Node
 Deployment EC2
   python aws.py
-  Iserire percorso ai permessi
+  Inserire percorso ai permessi
 
   
