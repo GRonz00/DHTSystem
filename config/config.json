@@ -1,9 +1,9 @@
 {
   "nrep": 2,
-  "heartbeat_interval": 60,
+  "heartbeat_interval": 45,
   "port": 8888,
   "key_pair": "vockey",
   "instance": "t2.micro",
-  "workers": 2,
+  "workers": 5,
   "http_port": 8080
 }
