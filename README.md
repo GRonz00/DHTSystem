@@ -1,7 +1,7 @@
 Deployment Docker Compose:
-  docker compose up -d
-  docker attach dhtsystem-node_i-1, per connettersi al nodo i
-  Iserire numero per
+\\  docker compose up -d
+\\  docker attach dhtsystem-node_i-1, per connettersi al nodo i
+\\  Inserire numero per
   1) Input resource 
   2) Get resource 
   3) Delete resource 
